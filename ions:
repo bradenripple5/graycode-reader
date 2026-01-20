@@ -1,0 +1,11 @@
+[0;1;32m●[0m graycode_reader.service - Graycode Reader HTTPS server
+     Loaded: loaded (/etc/systemd/system/graycode_reader.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Sun 2026-01-18 21:02:25 PST; 48s ago
+   Main PID: 27856 (python3)
+      Tasks: 1 (limit: 9185)
+     Memory: 9.0M
+        CPU: 111ms
+     CGroup: /system.slice/graycode_reader.service
+             └─27856 /usr/bin/python3 /home/brady/git/graycode_reader/server.py --host 0.0.0.0 --port 8000 --https --cert /home/brady/git/graycode_reader/server.crt --key /home/brady/git/graycode_reader/server.key
+
+Jan 18 21:02:25 brady-Inspiron-N5010 systemd[1]: Started Graycode Reader HTTPS server.

@@ -1,0 +1,30 @@
+[
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/drawable_ic_launcher.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/drawable/ic_launcher.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/drawable_ic_launcher_round.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/drawable/ic_launcher_round.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/xml_backup_rules.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/xml/backup_rules.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/xml_data_extraction_rules.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/xml/data_extraction_rules.xml"
+    },
+    {
+        "merged": "com.example.graycode.app-merged_res-36:/layout_activity_main.xml.flat",
+        "source": "com.example.graycode.app-main-38:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/layout_activity_main.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-merged_res-36:/layout_activity_captures.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.graycode.app-main-38:/layout/activity_captures.xml"
+    }
+]

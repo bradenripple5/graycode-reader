@@ -1,0 +1,14 @@
+[Unit]
+Description=Graycode Reader HTTPS server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brady/git/graycode_reader
+ExecStart=/usr/bin/python3 /home/brady/git/graycode_reader/server.py --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

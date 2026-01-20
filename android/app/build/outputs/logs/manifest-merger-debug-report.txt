@@ -1,0 +1,348 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:1:1-26:12
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:1:1-26:12
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:1:1-26:12
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:1:1-26:12
+MERGED from [com.google.android.material:material:1.11.0] /home/brady/.gradle/caches/8.10.2/transforms/ae52a45bb1fffcee5cff98ecd4d59a4e/transformed/material-1.11.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.camera:camera-video:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f19e357baadb2e99a1966c86e6d75f11/transformed/camera-video-1.3.2/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.camera:camera-lifecycle:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7348075d93369649a27ffc141ad7895/transformed/camera-lifecycle-1.3.2/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:17:1-36:12
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:17:1-36:12
+MERGED from [androidx.camera:camera-view:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/2914b23da7cf2c4b9c7402c71e9bfa0d/transformed/camera-view-1.3.2/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/8c5a8d3998829f04461d0a5ffb9d6521/transformed/appcompat-resources-1.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/brady/.gradle/caches/8.10.2/transforms/57291df28cdb4b507202627f1bfce84c/transformed/constraintlayout-2.0.1/AndroidManifest.xml:2:1-11:12
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/a694f2c8f736b39d947c25d5dd8392ec/transformed/appcompat-1.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/9eeaac7aa4e931c7c827201a5cabe49d/transformed/emoji2-views-helper-1.2.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:17:1-35:12
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/4baf3dbc3554a152235ddebca2b5f035/transformed/viewpager2-1.0.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.fragment:fragment:1.3.6] /home/brady/.gradle/caches/8.10.2/transforms/023e497023222d4dc41e5cbcebc8bba3/transformed/fragment-1.3.6/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.activity:activity:1.8.0] /home/brady/.gradle/caches/8.10.2/transforms/5596b5dfd0ceaccfb684e49c717b81cb/transformed/activity-1.8.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/5d91a31ffce462d8d4f9b96d98687900/transformed/drawerlayout-1.1.1/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/65ba94db9acb4d4bdfbf76498ced8b2e/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/cc91f09300c7e37d177446854af8a7fb/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.transition:transition:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/4b04c1c3c34afabfbdf9c6535281994c/transformed/transition-1.2.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/40d07609b3608c7db13e022d53020d32/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/a50749c60d0bedf34782cacd0d282129/transformed/vectordrawable-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/b20f713074dcd8deab16a9307afa968c/transformed/viewpager-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/6f1a63605386150aceebe3c6aa819f31/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.loader:loader:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/5cd76398dc6bc9a40a603b761deac3a0/transformed/loader-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/055989fcf6c40f4ec1b7a646301b3660/transformed/recyclerview-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.customview:customview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/e3aad9dc8a56485dde90d4f4a61fade1/transformed/customview-1.1.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:17:1-30:12
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/brady/.gradle/caches/8.10.2/transforms/af5b9cd3fe1a79888633421f953b0dcb/transformed/savedstate-1.2.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:17:1-35:12
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/38c1e91c43abb8fc1a8222ff72787b03/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/32b31c3dd9c6a36767066d3cc961885e/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/5b5f9dc43eb9a02e6aeab0e143a63830/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/c23f7c22116b9ebcc280bd4cdd179a76/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/4a0b3f2520223cea08e772b4134f8c72/transformed/lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.core:core-ktx:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/1de4318f524310ee15eb5f6619df6090/transformed/core-ktx-1.12.0/AndroidManifest.xml:2:1-7:12
+MERGED from [androidx.annotation:annotation-experimental:1.3.1] /home/brady/.gradle/caches/8.10.2/transforms/fd00db1397b09e8a63f81ffef2108de5/transformed/annotation-experimental-1.3.1/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/9dc0d0f0101e49563a8727dea0bf43e9/transformed/cursoradapter-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.cardview:cardview:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/50982c6896e63e53be7b425617fda964/transformed/cardview-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.exifinterface:exifinterface:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/43202290cde7fd6414e97f39758e104e/transformed/exifinterface-1.3.2/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/e125e41332d3c6a1e503244fbad42c9b/transformed/interpolator-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/386593d9f5b05c1466f8b8e44f6da4ad/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:17:1-27:12
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:17:1-55:12
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:17:1-33:12
+MERGED from [androidx.tracing:tracing:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/8266f3b08c92b6fc92ed1e270b6f2a5f/transformed/tracing-1.0.0/AndroidManifest.xml:17:1-24:12
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/brady/.gradle/caches/8.10.2/transforms/83f4d3e4bd064cbc3681dc392563e174/transformed/core-runtime-2.2.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/64c58f7f1cb85475db74868e7760d1e3/transformed/documentfile-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/d8c7ae253535f2f6ac4ac4713aca7894/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:17:1-22:12
+MERGED from [androidx.print:print:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/bb4e819e5482b6759d733d1f8d1d8512/transformed/print-1.0.0/AndroidManifest.xml:17:1-22:12
+	package
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.CAMERA
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:2:5-65
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:2:22-62
+uses-feature#android.hardware.camera.any
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:3:5-88
+	android:required
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:3:62-85
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:3:19-61
+application
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:5:5-25:19
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:5:5-25:19
+MERGED from [com.google.android.material:material:1.11.0] /home/brady/.gradle/caches/8.10.2/transforms/ae52a45bb1fffcee5cff98ecd4d59a4e/transformed/material-1.11.0/AndroidManifest.xml:22:5-20
+MERGED from [com.google.android.material:material:1.11.0] /home/brady/.gradle/caches/8.10.2/transforms/ae52a45bb1fffcee5cff98ecd4d59a4e/transformed/material-1.11.0/AndroidManifest.xml:22:5-20
+MERGED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:23:5-34:19
+MERGED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:23:5-34:19
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:23:5-34:19
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:23:5-34:19
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/brady/.gradle/caches/8.10.2/transforms/57291df28cdb4b507202627f1bfce84c/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/brady/.gradle/caches/8.10.2/transforms/57291df28cdb4b507202627f1bfce84c/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:28:5-89
+MERGED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:28:5-89
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:23:5-33:19
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/386593d9f5b05c1466f8b8e44f6da4ad/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:24:5-25:19
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/386593d9f5b05c1466f8b8e44f6da4ad/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:24:5-25:19
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:23:5-53:19
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:23:5-53:19
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:25:5-31:19
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:25:5-31:19
+	android:extractNativeLibs
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+	android:appComponentFactory
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:28:18-86
+	android:supportsRtl
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:12:9-35
+	android:label
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:10:9-41
+	android:fullBackupContent
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:8:9-54
+	android:roundIcon
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:11:9-56
+	android:icon
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:9:9-45
+	android:allowBackup
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:6:9-35
+	android:theme
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:13:9-46
+	android:dataExtractionRules
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:7:9-65
+activity#com.example.graycode.MainActivity
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:14:9-21:20
+	android:exported
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:16:13-36
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:15:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:17:13-20:29
+action#android.intent.action.MAIN
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:18:17-69
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:18:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:19:17-77
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:19:27-74
+activity#com.example.graycode.SavedCapturesActivity
+ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:22:9-24:40
+	android:exported
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:24:13-37
+	android:name
+		ADDED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml:23:13-50
+uses-sdk
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+MERGED from [com.google.android.material:material:1.11.0] /home/brady/.gradle/caches/8.10.2/transforms/ae52a45bb1fffcee5cff98ecd4d59a4e/transformed/material-1.11.0/AndroidManifest.xml:20:5-44
+MERGED from [com.google.android.material:material:1.11.0] /home/brady/.gradle/caches/8.10.2/transforms/ae52a45bb1fffcee5cff98ecd4d59a4e/transformed/material-1.11.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.camera:camera-video:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f19e357baadb2e99a1966c86e6d75f11/transformed/camera-video-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.camera:camera-video:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f19e357baadb2e99a1966c86e6d75f11/transformed/camera-video-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.camera:camera-lifecycle:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7348075d93369649a27ffc141ad7895/transformed/camera-lifecycle-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.camera:camera-lifecycle:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7348075d93369649a27ffc141ad7895/transformed/camera-lifecycle-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:21:5-44
+MERGED from [androidx.camera:camera-view:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/2914b23da7cf2c4b9c7402c71e9bfa0d/transformed/camera-view-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.camera:camera-view:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/2914b23da7cf2c4b9c7402c71e9bfa0d/transformed/camera-view-1.3.2/AndroidManifest.xml:5:5-44
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/8c5a8d3998829f04461d0a5ffb9d6521/transformed/appcompat-resources-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/8c5a8d3998829f04461d0a5ffb9d6521/transformed/appcompat-resources-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/brady/.gradle/caches/8.10.2/transforms/57291df28cdb4b507202627f1bfce84c/transformed/constraintlayout-2.0.1/AndroidManifest.xml:5:5-7:41
+MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/brady/.gradle/caches/8.10.2/transforms/57291df28cdb4b507202627f1bfce84c/transformed/constraintlayout-2.0.1/AndroidManifest.xml:5:5-7:41
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/a694f2c8f736b39d947c25d5dd8392ec/transformed/appcompat-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.appcompat:appcompat:1.6.1] /home/brady/.gradle/caches/8.10.2/transforms/a694f2c8f736b39d947c25d5dd8392ec/transformed/appcompat-1.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/9eeaac7aa4e931c7c827201a5cabe49d/transformed/emoji2-views-helper-1.2.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.emoji2:emoji2-views-helper:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/9eeaac7aa4e931c7c827201a5cabe49d/transformed/emoji2-views-helper-1.2.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/4baf3dbc3554a152235ddebca2b5f035/transformed/viewpager2-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.viewpager2:viewpager2:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/4baf3dbc3554a152235ddebca2b5f035/transformed/viewpager2-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.fragment:fragment:1.3.6] /home/brady/.gradle/caches/8.10.2/transforms/023e497023222d4dc41e5cbcebc8bba3/transformed/fragment-1.3.6/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.fragment:fragment:1.3.6] /home/brady/.gradle/caches/8.10.2/transforms/023e497023222d4dc41e5cbcebc8bba3/transformed/fragment-1.3.6/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.activity:activity:1.8.0] /home/brady/.gradle/caches/8.10.2/transforms/5596b5dfd0ceaccfb684e49c717b81cb/transformed/activity-1.8.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.activity:activity:1.8.0] /home/brady/.gradle/caches/8.10.2/transforms/5596b5dfd0ceaccfb684e49c717b81cb/transformed/activity-1.8.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/5d91a31ffce462d8d4f9b96d98687900/transformed/drawerlayout-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.drawerlayout:drawerlayout:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/5d91a31ffce462d8d4f9b96d98687900/transformed/drawerlayout-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/65ba94db9acb4d4bdfbf76498ced8b2e/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.coordinatorlayout:coordinatorlayout:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/65ba94db9acb4d4bdfbf76498ced8b2e/transformed/coordinatorlayout-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/cc91f09300c7e37d177446854af8a7fb/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.dynamicanimation:dynamicanimation:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/cc91f09300c7e37d177446854af8a7fb/transformed/dynamicanimation-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.transition:transition:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/4b04c1c3c34afabfbdf9c6535281994c/transformed/transition-1.2.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.transition:transition:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/4b04c1c3c34afabfbdf9c6535281994c/transformed/transition-1.2.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/40d07609b3608c7db13e022d53020d32/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable-animated:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/40d07609b3608c7db13e022d53020d32/transformed/vectordrawable-animated-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/a50749c60d0bedf34782cacd0d282129/transformed/vectordrawable-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.vectordrawable:vectordrawable:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/a50749c60d0bedf34782cacd0d282129/transformed/vectordrawable-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/b20f713074dcd8deab16a9307afa968c/transformed/viewpager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.viewpager:viewpager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/b20f713074dcd8deab16a9307afa968c/transformed/viewpager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/6f1a63605386150aceebe3c6aa819f31/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.legacy:legacy-support-core-utils:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/6f1a63605386150aceebe3c6aa819f31/transformed/legacy-support-core-utils-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.loader:loader:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/5cd76398dc6bc9a40a603b761deac3a0/transformed/loader-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.loader:loader:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/5cd76398dc6bc9a40a603b761deac3a0/transformed/loader-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/055989fcf6c40f4ec1b7a646301b3660/transformed/recyclerview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.recyclerview:recyclerview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/055989fcf6c40f4ec1b7a646301b3660/transformed/recyclerview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.customview:customview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/e3aad9dc8a56485dde90d4f4a61fade1/transformed/customview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.customview:customview:1.1.0] /home/brady/.gradle/caches/8.10.2/transforms/e3aad9dc8a56485dde90d4f4a61fade1/transformed/customview-1.1.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/brady/.gradle/caches/8.10.2/transforms/af5b9cd3fe1a79888633421f953b0dcb/transformed/savedstate-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.savedstate:savedstate:1.2.1] /home/brady/.gradle/caches/8.10.2/transforms/af5b9cd3fe1a79888633421f953b0dcb/transformed/savedstate-1.2.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:21:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/38c1e91c43abb8fc1a8222ff72787b03/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/38c1e91c43abb8fc1a8222ff72787b03/transformed/lifecycle-livedata-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/32b31c3dd9c6a36767066d3cc961885e/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-livedata-core:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/32b31c3dd9c6a36767066d3cc961885e/transformed/lifecycle-livedata-core-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/5b5f9dc43eb9a02e6aeab0e143a63830/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/5b5f9dc43eb9a02e6aeab0e143a63830/transformed/lifecycle-viewmodel-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/c23f7c22116b9ebcc280bd4cdd179a76/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-runtime:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/c23f7c22116b9ebcc280bd4cdd179a76/transformed/lifecycle-runtime-2.6.1/AndroidManifest.xml:5:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/4a0b3f2520223cea08e772b4134f8c72/transformed/lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.lifecycle:lifecycle-viewmodel-savedstate:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/4a0b3f2520223cea08e772b4134f8c72/transformed/lifecycle-viewmodel-savedstate-2.6.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.core:core-ktx:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/1de4318f524310ee15eb5f6619df6090/transformed/core-ktx-1.12.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.core:core-ktx:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/1de4318f524310ee15eb5f6619df6090/transformed/core-ktx-1.12.0/AndroidManifest.xml:5:5-44
+MERGED from [androidx.annotation:annotation-experimental:1.3.1] /home/brady/.gradle/caches/8.10.2/transforms/fd00db1397b09e8a63f81ffef2108de5/transformed/annotation-experimental-1.3.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.annotation:annotation-experimental:1.3.1] /home/brady/.gradle/caches/8.10.2/transforms/fd00db1397b09e8a63f81ffef2108de5/transformed/annotation-experimental-1.3.1/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/9dc0d0f0101e49563a8727dea0bf43e9/transformed/cursoradapter-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cursoradapter:cursoradapter:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/9dc0d0f0101e49563a8727dea0bf43e9/transformed/cursoradapter-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cardview:cardview:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/50982c6896e63e53be7b425617fda964/transformed/cardview-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.cardview:cardview:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/50982c6896e63e53be7b425617fda964/transformed/cardview-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.exifinterface:exifinterface:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/43202290cde7fd6414e97f39758e104e/transformed/exifinterface-1.3.2/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.exifinterface:exifinterface:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/43202290cde7fd6414e97f39758e104e/transformed/exifinterface-1.3.2/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/e125e41332d3c6a1e503244fbad42c9b/transformed/interpolator-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.interpolator:interpolator:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/e125e41332d3c6a1e503244fbad42c9b/transformed/interpolator-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/386593d9f5b05c1466f8b8e44f6da4ad/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/386593d9f5b05c1466f8b8e44f6da4ad/transformed/versionedparcelable-1.1.1/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:21:5-44
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:21:5-23:41
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:21:5-23:41
+MERGED from [androidx.tracing:tracing:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/8266f3b08c92b6fc92ed1e270b6f2a5f/transformed/tracing-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.tracing:tracing:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/8266f3b08c92b6fc92ed1e270b6f2a5f/transformed/tracing-1.0.0/AndroidManifest.xml:20:5-22:41
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/brady/.gradle/caches/8.10.2/transforms/83f4d3e4bd064cbc3681dc392563e174/transformed/core-runtime-2.2.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.arch.core:core-runtime:2.2.0] /home/brady/.gradle/caches/8.10.2/transforms/83f4d3e4bd064cbc3681dc392563e174/transformed/core-runtime-2.2.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/64c58f7f1cb85475db74868e7760d1e3/transformed/documentfile-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.documentfile:documentfile:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/64c58f7f1cb85475db74868e7760d1e3/transformed/documentfile-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/d8c7ae253535f2f6ac4ac4713aca7894/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.localbroadcastmanager:localbroadcastmanager:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/d8c7ae253535f2f6ac4ac4713aca7894/transformed/localbroadcastmanager-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.print:print:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/bb4e819e5482b6759d733d1f8d1d8512/transformed/print-1.0.0/AndroidManifest.xml:20:5-44
+MERGED from [androidx.print:print:1.0.0] /home/brady/.gradle/caches/8.10.2/transforms/bb4e819e5482b6759d733d1f8d1d8512/transformed/print-1.0.0/AndroidManifest.xml:20:5-44
+	android:targetSdkVersion
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/brady/git/graycode_reader/android/app/src/main/AndroidManifest.xml
+service#androidx.camera.core.impl.MetadataHolderService
+ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:24:9-33:19
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:29:9-33:78
+MERGED from [androidx.camera:camera-core:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/d7f2992b9f2750c07786a603d92492a2/transformed/camera-core-1.3.2/AndroidManifest.xml:29:9-33:78
+	tools:node
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:29:13-31
+	android:enabled
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:26:13-36
+	android:exported
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:27:13-37
+	tools:ignore
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:28:13-75
+	android:name
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:25:13-75
+meta-data#androidx.camera.core.impl.MetadataHolderService.DEFAULT_CONFIG_PROVIDER
+ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:30:13-32:89
+	android:value
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:32:17-86
+	android:name
+		ADDED from [androidx.camera:camera-camera2:1.3.2] /home/brady/.gradle/caches/8.10.2/transforms/f54c281c6a40d320e3ad82e1ef464293/transformed/camera-camera2-1.3.2/AndroidManifest.xml:31:17-103
+provider#androidx.startup.InitializationProvider
+ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:24:9-32:20
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:26:9-30:34
+MERGED from [androidx.startup:startup-runtime:1.1.1] /home/brady/.gradle/caches/8.10.2/transforms/ba5ad064399434c7ea6fdd1d1b7a02ae/transformed/startup-runtime-1.1.1/AndroidManifest.xml:26:9-30:34
+	tools:node
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:28:13-31
+	android:authorities
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:26:13-68
+	android:exported
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:27:13-37
+	android:name
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:25:13-67
+meta-data#androidx.emoji2.text.EmojiCompatInitializer
+ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.emoji2:emoji2:1.2.0] /home/brady/.gradle/caches/8.10.2/transforms/14366bf61ffea2f53cee68d3b1153aa6/transformed/emoji2-1.2.0/AndroidManifest.xml:30:17-75
+permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
+	android:protectionLevel
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:24:9-44
+	android:name
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:23:9-81
+permission#com.example.graycode.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:22:5-24:47
+	android:protectionLevel
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:24:9-44
+	android:name
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:23:9-81
+uses-permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:26:5-97
+	android:name
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:26:22-94
+uses-permission#com.example.graycode.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:26:5-97
+	android:name
+		ADDED from [androidx.core:core:1.12.0] /home/brady/.gradle/caches/8.10.2/transforms/13dc0872d93fc13be57fd7fd3d6e9f0a/transformed/core-1.12.0/AndroidManifest.xml:26:22-94
+meta-data#androidx.lifecycle.ProcessLifecycleInitializer
+ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.lifecycle:lifecycle-process:2.6.1] /home/brady/.gradle/caches/8.10.2/transforms/f5f25c8c86d602be1b1ac38cf29901ed/transformed/lifecycle-process-2.6.1/AndroidManifest.xml:30:17-78
+meta-data#androidx.profileinstaller.ProfileInstallerInitializer
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:29:13-31:52
+	android:value
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:31:17-49
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:30:17-85
+receiver#androidx.profileinstaller.ProfileInstallReceiver
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:34:9-52:20
+	android:enabled
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:37:13-35
+	android:exported
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:38:13-36
+	android:permission
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:39:13-57
+	android:directBootAware
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:36:13-44
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:35:13-76
+intent-filter#action:name:androidx.profileinstaller.action.INSTALL_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:40:13-42:29
+action#androidx.profileinstaller.action.INSTALL_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:17-91
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:41:25-88
+intent-filter#action:name:androidx.profileinstaller.action.SKIP_FILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:43:13-45:29
+action#androidx.profileinstaller.action.SKIP_FILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:17-85
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:44:25-82
+intent-filter#action:name:androidx.profileinstaller.action.SAVE_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:46:13-48:29
+action#androidx.profileinstaller.action.SAVE_PROFILE
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:17-88
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:47:25-85
+intent-filter#action:name:androidx.profileinstaller.action.BENCHMARK_OPERATION
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:49:13-51:29
+action#androidx.profileinstaller.action.BENCHMARK_OPERATION
+ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:17-95
+	android:name
+		ADDED from [androidx.profileinstaller:profileinstaller:1.3.0] /home/brady/.gradle/caches/8.10.2/transforms/f2c42572b3e136112b6763c51111d694/transformed/profileinstaller-1.3.0/AndroidManifest.xml:50:25-92
