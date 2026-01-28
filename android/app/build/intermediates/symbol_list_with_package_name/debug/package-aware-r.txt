@@ -3094,6 +3094,7 @@ id center
 id centerCrop
 id centerInside
 id center_horizontal
+id center_only_toggle
 id center_vertical
 id chain
 id chains
@@ -3114,6 +3115,8 @@ id content
 id contentPanel
 id contiguous
 id controls_panel
+id convergence_label
+id convergence_seek
 id coordinator
 id cos
 id counterclockwise
@@ -3185,6 +3188,8 @@ id ghost_view_holder
 id gone
 id graph
 id graph_wrap
+id green_ratio_label
+id green_ratio_seek
 id group_divider
 id groups
 id header_title
@@ -3216,6 +3221,8 @@ id leftToRight
 id legacy
 id line1
 id line3
+id line_count_label
+id line_count_seek
 id linear
 id listMode
 id list_item
@@ -3446,6 +3453,7 @@ id titleDividerNoCustom
 id title_template
 id title_text
 id toggle
+id toggle_angle_details
 id toggle_controls
 id toggle_output
 id toggle_preview

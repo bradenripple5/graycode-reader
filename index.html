@@ -1,340 +1,335 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Radial Binary Pattern</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML Files</title>
   <style>
+    :root {
+      color-scheme: light;
+    }
     body {
-      font-family: Arial, sans-serif;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
-      background: #f5f5f5;
+      margin: 0;
+      padding: 24px;
+      font-family: "Times New Roman", serif;
+      background: #f7f3ea;
+      color: #1c1c1c;
     }
     h1 {
-      text-align: center;
-      color: #333;
+      margin: 0 0 12px;
     }
-    .container {
-      background: white;
-      padding: 20px;
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 360px) 1fr;
+      gap: 24px;
+    }
+    .panel {
+      background: #fffdf6;
+      border: 1px solid #d8cfc0;
+      padding: 16px;
       border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    canvas {
+    .panel[hidden] {
+      display: none;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .versioning-files {
+      display: none;
+    }
+    a.file-link {
       display: block;
-      margin: 20px auto;
-      background: #eee;
-      border: 1px solid #ddd;
+      padding: 10px 12px;
+      background: #fffdf6;
+      border: 1px solid #d8cfc0;
+      border-radius: 8px;
+      color: inherit;
+      text-decoration: none;
     }
-    .controls {
-      margin: 20px 0;
-      text-align: center;
+    a.file-link:hover {
+      background: #ffe6b8;
+      border-color: #c99b3f;
     }
-    button {
-      background: #007bff;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 16px;
-      margin: 10px 5px 0 0;
-    }
-    button:hover {
-      background: #0056b3;
-    }
-    .info {
+    .hint {
       color: #666;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .view-toggle {
+      display: flex;
+      gap: 8px;
+      margin: 8px 0 6px;
+    }
+    .view-toggle button {
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #c9b693;
+      background: #f1e6d0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .view-toggle button.active {
+      background: #ffe6b8;
+      border-color: #c99b3f;
+    }
+    button.file {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #f1e6d0;
+      border: 1px solid #c9b693;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
       font-size: 14px;
+    }
+    button.file.active {
+      background: #ffe6b8;
+      border-color: #c99b3f;
+    }
+    .meta {
+      font-size: 14px;
+      line-height: 1.4;
+      background: #fff;
+      border: 1px solid #e0d5c0;
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 120px;
+      white-space: pre-line;
+    }
+    .nav-row {
+      margin: 16px 0 8px;
+    }
+    .nav-buttons {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .nav-label {
+      flex: 1;
+      font-size: 13px;
+      color: #4e3a10;
+    }
+    .nav-btn {
+      width: 32px;
+      height: 32px;
+      border: 1px solid #c9b693;
+      background: #f1e6d0;
+      border-radius: 6px;
+      cursor: pointer;
+      position: relative;
+    }
+    .nav-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .nav-btn.triangle::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 0;
+      height: 0;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+    }
+    .nav-btn.left::before {
+      border-right: 10px solid #6b5120;
+      margin-left: -2px;
+    }
+    .nav-btn.right::before {
+      border-left: 10px solid #6b5120;
+      margin-left: 2px;
+    }
+    .content {
+      width: 100%;
+      min-height: 200px;
+      margin-top: 12px;
+      padding: 10px;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid #e0d5c0;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    .diff-view {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #e0d5c0;
+      background: #fff;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 320px;
+      overflow: auto;
+    }
+    #previewFrame {
+      width: 100%;
+      min-height: 320px;
+      margin-top: 12px;
+      border: 1px solid #e0d5c0;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .diff-line.add {
+      background: #e5f6df;
+      color: #1d5a1a;
+    }
+    .diff-line.remove {
+      background: #fbe1e1;
+      color: #7a1b1b;
+    }
+    .diff-line.same {
+      color: #444;
+    }
+    .submit-row {
+      margin-top: 12px;
+    }
+    .submit-row button {
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid #c9b693;
+      background: #f1e6d0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .submit-row button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .status {
       margin-top: 10px;
-      text-align: center;
+      font-size: 12px;
+      color: #654c1a;
+    }
+    .versioning-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .meta {
+      min-height: 0;
+    }
+    .versioning-bottom {
+      display: flex;
+      flex-direction: column;
+    }
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>Radial Binary Pattern</h1>
-
-  <div class="container">
-    <div class="controls">
-      <label for="bandCount">Number of bands: <span id="bandCountVal">4</span></label>
-      <input id="bandCount" type="range" min="1" max="12" value="4">
-      <label for="circleSize">Circle radius: <span id="circleSizeVal">300</span>px</label>
-      <input id="circleSize" type="range" min="10" max="1000" value="300">
-      <label>
-        <input id="invertBits" type="checkbox">
-        Invert bits
-      </label>
-      <label>
-        <input id="reverseBits" type="checkbox">
-        Reverse bit order
-      </label>
-      <label for="centerGap">Center whitespace: <span id="centerGapVal">90</span>%</label>
-      <input id="centerGap" type="range" min="0" max="90" value="90">
-      <label for="angleOffset">Angle offset: <span id="angleOffsetVal">0</span>°</label>
-      <input id="angleOffset" type="range" min="0" max="359" value="0">
-      <label for="rotateSpeed">Rotation speed: <span id="rotateSpeedVal">30</span>°/s</label>
-      <input id="rotateSpeed" type="range" min="1" max="30" value="30">
-      <button id="rotateBtn">Start rotation</button>
-      <button id="reloadBtn">Regenerate</button>
-      <div class="info">Generated in the browser (Gray code)</div>
+  <h1>HTML Files</h1>
+  <div class="hint">Click a file to open it. Use Versioning to compare snapshots.</div>
+  <div class="layout">
+    <div class="panel">
+      <div class="header-row">
+        <h2>Files</h2>
+        <button class="file" id="versioningToggle" type="button">Versioning</button>
+      </div>
+      <ul id="fileLinks"></ul>
     </div>
-
-    <canvas id="radialCanvas"></canvas>
-
-    <div class="info">Rows (rings)</div>
-    <textarea id="rowsOutput" readonly></textarea>
-
-    <div class="info">Columns (angular positions)</div>
-    <textarea id="colsOutput" readonly></textarea>
-
+    <div class="panel" id="versioningPanel" hidden>
+      <ul id="fileList" class="versioning-files"></ul>
+      <h3 id="fileTitle"></h3>
+      <div class="view-toggle">
+        <button id="viewSourceBtn" type="button" class="active">Source</button>
+        <button id="viewIframeBtn" type="button">Iframe</button>
+        <button id="rollBackBtn" type="button">Roll Back</button>
+        <button id="rollForwardBtn" type="button">Roll Forward</button>
+      </div>
+      <div class="nav-row" id="navRow" hidden>
+        <div class="nav-buttons">
+          <button class="nav-btn triangle left" id="backBtn" aria-label="Older snapshot"></button>
+          <div class="nav-label" id="navLabel">Current file</div>
+          <button class="nav-btn triangle right" id="forwardBtn" aria-label="Newer snapshot"></button>
+        </div>
+      </div>
+      <div class="versioning-body">
+        <div class="versioning-bottom">
+          <div class="diff-view" id="diffView" hidden></div>
+          <iframe id="previewFrame" hidden sandbox="allow-scripts allow-same-origin"></iframe>
+          <textarea class="content" id="contentArea" hidden></textarea>
+          <div class="submit-row">
+            <button id="submitBtn" disabled>Submit change</button>
+          </div>
+          <div class="status" id="status"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
+  <script type="module">
+    const listEl = document.getElementById('fileLinks');
+    const versioningPanel = document.getElementById('versioningPanel');
+    const files = Object.keys(import.meta.glob('./*.html', { query: '?url', import: 'default', eager: true }))
+      .filter((path) => path !== './index.html')
+      .sort();
+
+    if (!files.length) {
+      const item = document.createElement('li');
+      item.textContent = 'No HTML files found.';
+      listEl.appendChild(item);
+    } else {
+      files.forEach((path) => {
+        const li = document.createElement('li');
+        const link = document.createElement('a');
+        link.className = 'file-link';
+        const clean = path.replace(/^\.\//, '');
+        link.href = `/${clean}`;
+        link.textContent = clean;
+        link.addEventListener('click', (event) => {
+          if (versioningPanel && !versioningPanel.hasAttribute('hidden')) {
+            event.preventDefault();
+            if (window.versioningSelectFile) {
+              window.versioningSelectFile(clean);
+            }
+          }
+        });
+        li.appendChild(link);
+        listEl.appendChild(li);
+      });
+    }
+  </script>
   <script>
-    const baseRingWidth = 25;
+    const toggleBtn = document.getElementById('versioningToggle');
+    const versioningPanel = document.getElementById('versioningPanel');
+    console.log('[index] loaded');
 
-    function renderRadialPattern(data, canvas, centerGapPercent, angleOffsetDeg, radiusPx) {
-      if (!data || data.length === 0) return;
-
-      const ctx = canvas.getContext('2d');
-      const numRings = data.length;
-      const maxRadius = numRings * baseRingWidth;
-      const scaledRadius = Math.max(1, radiusPx);
-      const size = scaledRadius * 2 + 100;
-
-      canvas.width = size;
-      canvas.height = size;
-
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      const gapRadius = (centerGapPercent / 100) * scaledRadius;
-      const ringWidth = (scaledRadius - gapRadius) / numRings;
-      const angleOffset = (angleOffsetDeg * Math.PI) / 180;
-
-      ctx.fillStyle = '#EEEEEE';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      for (let ringIdx = 0; ringIdx < numRings; ringIdx++) {
-        const segments = data[ringIdx];
-        const numSegments = segments.length;
-        const innerRadius = gapRadius + ringIdx * ringWidth;
-        const outerRadius = gapRadius + (ringIdx + 1) * ringWidth;
-
-        for (let segIdx = 0; segIdx < numSegments; segIdx++) {
-          const value = segments[segIdx];
-
-          const startAngle = (segIdx / numSegments) * 2 * Math.PI + angleOffset;
-          const endAngle = ((segIdx + 1) / numSegments) * 2 * Math.PI + angleOffset;
-
-          ctx.fillStyle = value === 1 ? '#FFFFFF' : '#000';
-
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
-          ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.strokeStyle = '#CCCCCC';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-
-      if (centerGapPercent > 0) {
-        const markerThickness = Math.max(2, ringWidth * 0.08);
-        ctx.fillStyle = '#FF0000';
-        drawRing(ctx, centerX, centerY, gapRadius, gapRadius + markerThickness);
-        drawRing(ctx, centerX, centerY, gapRadius + numRings * ringWidth - markerThickness, gapRadius + numRings * ringWidth);
-      }
-
-      drawColumnLabels(
-        ctx,
-        centerX,
-        centerY,
-        gapRadius + numRings * ringWidth,
-        ringWidth,
-        data,
-        angleOffset
-      );
-    }
-
-    function drawRing(ctx, cx, cy, innerRadius, outerRadius) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, outerRadius, 0, 2 * Math.PI);
-      ctx.arc(cx, cy, innerRadius, 2 * Math.PI, 0, true);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    function columnValueFromRings(rings, colIndex) {
-      const sections = rings.length;
-      let value = 0;
-      for (let ringIdx = 0; ringIdx < sections; ringIdx++) {
-        const bit = rings[ringIdx][colIndex] ?? 0;
-        value = (value << 1) | (bit & 1);
-      }
-      return value;
-    }
-
-    function drawColumnLabels(ctx, cx, cy, outerRadius, ringWidth, rings, angleOffset) {
-      const columnCount = rings.length > 0 ? rings[0].length : 0;
-      if (columnCount <= 0) return;
-      const labelRadius = outerRadius + Math.max(12, ringWidth * 0.4);
-      const arcPerColumn = (2 * Math.PI * labelRadius) / columnCount;
-
-      ctx.save();
-      ctx.fillStyle = '#222222';
-      ctx.font = '12px Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      const maxLabel = String(Math.max(0, (1 << rings.length) - 1));
-      const maxLabelWidth = ctx.measureText(maxLabel).width;
-      const minSpacing = maxLabelWidth + 6;
-      const step = Math.max(1, Math.ceil(minSpacing / arcPerColumn));
-
-      for (let segIdx = 0; segIdx < columnCount; segIdx += step) {
-        const angle = (segIdx / columnCount) * 2 * Math.PI + angleOffset;
-        const x = cx + Math.cos(angle) * labelRadius;
-        const y = cy + Math.sin(angle) * labelRadius;
-        const value = columnValueFromRings(rings, segIdx);
-
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(angle);
-        ctx.fillText(String(value), 0, 0);
-        ctx.restore();
-      }
-
-      ctx.restore();
-    }
-
-    function grayCode(value) {
-      return value ^ (value >> 1);
-    }
-
-    function generateRings(sections, invert, reverse) {
-      const columns = 1 << sections;
-      const rings = Array.from({ length: sections }, () => []);
-      for (let col = 0; col < columns; col++) {
-        const code = grayCode(col);
-        for (let bit = 0; bit < sections; bit++) {
-          const ringIdx = bit;
-          const bitIdx = reverse ? bit : (sections - 1 - bit);
-          let value = (code >> bitIdx) & 1;
-          if (invert) value = value ^ 1;
-          rings[ringIdx].push(value);
-        }
-      }
-      return rings;
-    }
-
-    function ringsToColumns(rings) {
-      const ringCount = rings.length;
-      if (ringCount === 0) return [];
-      const cols = rings[0].length;
-      const columns = [];
-      for (let c = 0; c < cols; c++) {
-        const col = [];
-        for (let r = 0; r < ringCount; r++) {
-          col.push(rings[r][c] ?? 0);
-        }
-        columns.push(col);
-      }
-      return columns;
-    }
-
-    function renderFromControls() {
-      const canvas = document.getElementById('radialCanvas');
-      const bandInput = document.getElementById('bandCount');
-      const bandVal = document.getElementById('bandCountVal');
-      const sizeInput = document.getElementById('circleSize');
-      const sizeVal = document.getElementById('circleSizeVal');
-      const invertInput = document.getElementById('invertBits');
-      const reverseInput = document.getElementById('reverseBits');
-      const gapInput = document.getElementById('centerGap');
-      const gapVal = document.getElementById('centerGapVal');
-      const angleInput = document.getElementById('angleOffset');
-      const angleVal = document.getElementById('angleOffsetVal');
-      const speedInput = document.getElementById('rotateSpeed');
-      const speedVal = document.getElementById('rotateSpeedVal');
-      const rowsOutput = document.getElementById('rowsOutput');
-      const colsOutput = document.getElementById('colsOutput');
-
-      const sections = parseInt(bandInput.value, 10);
-      const defaultRadius = sections * baseRingWidth;
-      const maxRadius = Math.max(defaultRadius * 10, 10);
-      sizeInput.max = String(Math.round(maxRadius));
-      if (sizeInput.value === "0") {
-        sizeInput.value = "300";
-      }
-
-      const radiusPx = parseInt(sizeInput.value, 10);
-      const invert = invertInput.checked;
-      const reverse = reverseInput.checked;
-      const gapPercent = parseInt(gapInput.value, 10);
-      const angleOffset = autoRotate ? currentAngle : parseFloat(angleInput.value);
-      if (!autoRotate) {
-        currentAngle = angleOffset;
-      }
-      const displayAngle = ((angleOffset % 360) + 360) % 360;
-
-      bandVal.textContent = sections;
-      sizeVal.textContent = radiusPx;
-      gapVal.textContent = gapPercent;
-      angleVal.textContent = String(Math.round(displayAngle));
-      speedVal.textContent = speedInput.value;
-
-      const rings = generateRings(sections, invert, reverse);
-      renderRadialPattern(rings, canvas, gapPercent, angleOffset, radiusPx);
-
-      const rowsText = rings.map(row => row.join(',')).join('\n');
-      const columns = ringsToColumns(rings);
-      const colsText = columns.map(col => col.join(',')).join('\n');
-      rowsOutput.value = rowsText;
-      colsOutput.value = colsText;
-
-    }
-
-    let autoRotate = false;
-    let lastFrameTime = 0;
-    let currentAngle = 0;
-
-    function stepRotation(timestamp) {
-      if (!autoRotate) return;
-      if (!lastFrameTime) lastFrameTime = timestamp;
-      const deltaSec = (timestamp - lastFrameTime) / 1000;
-      lastFrameTime = timestamp;
-
-      const angleInput = document.getElementById('angleOffset');
-      const speedInput = document.getElementById('rotateSpeed');
-      const speed = parseFloat(speedInput.value);
-      currentAngle += speed * deltaSec;
-      const displayAngle = ((currentAngle % 360) + 360) % 360;
-      angleInput.value = String(displayAngle);
-      renderFromControls();
-      requestAnimationFrame(stepRotation);
-    }
-
-    document.getElementById('bandCount').addEventListener('input', renderFromControls);
-    document.getElementById('circleSize').addEventListener('input', renderFromControls);
-    document.getElementById('invertBits').addEventListener('change', renderFromControls);
-    document.getElementById('reverseBits').addEventListener('change', renderFromControls);
-    document.getElementById('centerGap').addEventListener('input', renderFromControls);
-    document.getElementById('angleOffset').addEventListener('input', renderFromControls);
-    document.getElementById('rotateSpeed').addEventListener('input', renderFromControls);
-    document.getElementById('reloadBtn').addEventListener('click', renderFromControls);
-    document.getElementById('rotateBtn').addEventListener('click', () => {
-      autoRotate = !autoRotate;
-      const button = document.getElementById('rotateBtn');
-      button.textContent = autoRotate ? 'Stop rotation' : 'Start rotation';
-      if (autoRotate) {
-        lastFrameTime = 0;
-        requestAnimationFrame(stepRotation);
+    toggleBtn.addEventListener('click', () => {
+      const isHidden = versioningPanel.hasAttribute('hidden');
+      if (isHidden) {
+        versioningPanel.removeAttribute('hidden');
+        toggleBtn.textContent = 'Hide Versioning';
+        console.log('[index] versioning opened');
+        window.dispatchEvent(new CustomEvent('versioning-open'));
+      } else {
+        versioningPanel.setAttribute('hidden', '');
+        toggleBtn.textContent = 'Open Versioning';
+        console.log('[index] versioning closed');
       }
     });
-    window.onload = renderFromControls;
   </script>
+  <script src="/vendor/diff.min.js"></script>
+  <script type="module" src="/versioning.js"></script>
 </body>
 </html>

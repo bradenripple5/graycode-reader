@@ -1,5 +1,15 @@
 # graycode_reader
 
+## Quick start
+
+Initially, run the dev server:
+
+```bash
+npm run dev
+```
+
+Side note on versioning: the project includes `versioning.html` / `versioning.js` for the versioning UI/logic.
+
 ## Local server (HTTP)
 
 Serves `index.html` and `pattern.json` over HTTP.

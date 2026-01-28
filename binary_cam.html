@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binary Camera Window</title>
+    <style>
+        :root {
+            --bg: #151515;
+            --panel: #222;
+            --text: #f5f5f5;
+            --accent: #4caf50;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: monospace;
+        }
+
+        h1 {
+            margin: 0 0 16px 0;
+        }
+
+        .controls {
+            background: var(--panel);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            max-width: 900px;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input[type="range"],
+        select {
+            width: 100%;
+        }
+
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #1f1f1f;
+            color: var(--text);
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .button-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .button-row label {
+            margin: 0;
+        }
+
+        input[type="number"] {
+            width: 80px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #1f1f1f;
+            color: var(--text);
+        }
+
+        .layout {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            background: #111;
+            padding: 12px;
+            border-radius: 8px;
+            flex: 1 1 360px;
+        }
+
+        .output-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex: 1 1 360px;
+        }
+
+        #fullCanvas {
+            width: 100%;
+            height: auto;
+            background: #000;
+            border-radius: 4px;
+        }
+
+        #binaryOutput {
+            background: #000;
+            color: #8bc34a;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        #groupedOutput {
+            background: #000;
+            color: #ffd54f;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        #filteredOutput {
+            background: #000;
+            color: #ff7043;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        .value {
+            color: var(--accent);
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Binary Camera Window</h1>
+
+    <div class="controls">
+        <div class="control-group button-row">
+            <button id="startBtn">Start Camera</button>
+            <button id="stopBtn" disabled>Stop Camera</button>
+            <label for="bitGroupSize">No. of bits:</label>
+            <input type="number" id="bitGroupSize" min="1" max="64" value="8">
+        </div>
+
+        <div class="control-group">
+            <label for="cameraSelect">Camera:</label>
+            <select id="cameraSelect"></select>
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Width: <span class="value" id="widthValue">200</span> px
+            </label>
+            <input type="range" id="windowWidth" min="60" max="640" value="200" step="10">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Height: <span class="value" id="heightValue">150</span> px
+            </label>
+            <input type="range" id="windowHeight" min="60" max="480" value="150" step="10">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Threshold: <span class="value" id="thresholdValue">128</span>
+            </label>
+            <input type="range" id="threshold" min="0" max="255" value="128" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Red Threshold: <span class="value" id="redThresholdValue">180</span>
+            </label>
+            <input type="range" id="redThreshold" min="0" max="255" value="180" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Red Row %: <span class="value" id="redRowValue">60</span>%
+            </label>
+            <input type="range" id="redRowPercent" min="10" max="100" value="60" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Vertical Lines: <span class="value" id="linesValue">4</span>
+            </label>
+            <input type="range" id="lineCount" min="1" max="20" value="4" step="1">
+        </div>
+
+        <div class="control-group toggle-row">
+            <input type="checkbox" id="linesOnly">
+            <label for="linesOnly">Binary Output Only Along Lines</label>
+        </div>
+
+        <div class="control-group toggle-row">
+            <input type="checkbox" id="showRedDebug">
+            <label for="showRedDebug">Show Red Band Debug</label>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="panel">
+            <h3>Camera View</h3>
+            <canvas id="fullCanvas"></canvas>
+        </div>
+        <div class="output-stack">
+            <div class="panel">
+                <h3>Grouped Output (No. of bits)</h3>
+                <pre id="groupedOutput"></pre>
+            </div>
+            <div class="panel">
+                <h3>Binary Output</h3>
+                <pre id="binaryOutput"></pre>
+            </div>
+            <div class="panel">
+                <h3>Filtered Output (Between Red Bands)</h3>
+                <pre id="filteredOutput"></pre>
+            </div>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline style="display: none;"></video>
+
+    <script>
+        const video = document.getElementById('video');
+        const fullCanvas = document.getElementById('fullCanvas');
+        const fullCtx = fullCanvas.getContext('2d');
+        const output = document.getElementById('binaryOutput');
+        const groupedOutput = document.getElementById('groupedOutput');
+        const filteredOutput = document.getElementById('filteredOutput');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const bitGroupSize = document.getElementById('bitGroupSize');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const widthSlider = document.getElementById('windowWidth');
+        const heightSlider = document.getElementById('windowHeight');
+        const thresholdSlider = document.getElementById('threshold');
+        const redThresholdSlider = document.getElementById('redThreshold');
+        const redRowPercentSlider = document.getElementById('redRowPercent');
+        const lineCountSlider = document.getElementById('lineCount');
+        const linesOnlyToggle = document.getElementById('linesOnly');
+        const showRedDebugToggle = document.getElementById('showRedDebug');
+        const widthValue = document.getElementById('widthValue');
+        const heightValue = document.getElementById('heightValue');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const redThresholdValue = document.getElementById('redThresholdValue');
+        const redRowValue = document.getElementById('redRowValue');
+        const linesValue = document.getElementById('linesValue');
+
+        let stream = null;
+        let animationId = null;
+
+        function updateSliderLabels() {
+            widthValue.textContent = widthSlider.value;
+            heightValue.textContent = heightSlider.value;
+            thresholdValue.textContent = thresholdSlider.value;
+            redThresholdValue.textContent = redThresholdSlider.value;
+            redRowValue.textContent = redRowPercentSlider.value;
+            linesValue.textContent = lineCountSlider.value;
+        }
+
+        async function refreshCameras(requestPermission) {
+            if (requestPermission) {
+                await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } }
+                });
+            }
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(device => device.kind === 'videoinput');
+
+            cameraSelect.innerHTML = '';
+            cams.forEach((cam, index) => {
+                const option = document.createElement('option');
+                const label = cam.label || `Camera ${index + 1}`;
+                option.value = cam.deviceId;
+                option.textContent = label;
+                cameraSelect.appendChild(option);
+            });
+            selectPreferredCamera(cams);
+        }
+
+        function selectPreferredCamera(cams) {
+            const matchIndex = cams.findIndex((cam) => /back|rear|environment/i.test(cam.label || ''));
+            if (matchIndex >= 0) {
+                cameraSelect.selectedIndex = matchIndex;
+            }
+        }
+
+        function buildVideoConstraints(deviceId) {
+            if (deviceId) {
+                return { deviceId: { exact: deviceId } };
+            }
+            return { facingMode: { ideal: 'environment' } };
+        }
+
+        function clampWindowSize(maxWidth, maxHeight) {
+            widthSlider.max = maxWidth;
+            heightSlider.max = maxHeight;
+            widthSlider.value = Math.min(parseInt(widthSlider.value), maxWidth);
+            heightSlider.value = Math.min(parseInt(heightSlider.value), maxHeight);
+            updateSliderLabels();
+        }
+
+        function buildBinaryText(roiData, roiWidth, roiHeight, lineCount, linesOnly, yStart, yEnd) {
+            const maxCols = 120;
+            const maxRows = 60;
+            const stepX = Math.max(1, Math.ceil(roiWidth / maxCols));
+            const stepY = Math.max(1, Math.ceil(roiHeight / maxRows));
+            const threshold = parseInt(thresholdSlider.value, 10);
+
+            let text = '';
+            const lines = Math.max(1, lineCount);
+            const lineSpacing = roiWidth / (lines + 1);
+            const rowStart = Math.max(0, yStart ?? 0);
+            const rowEnd = Math.min(roiHeight, yEnd ?? roiHeight);
+
+            if (linesOnly) {
+                for (let i = 1; i <= lines; i++) {
+                    const xLine = Math.floor(lineSpacing * i);
+                    for (let y = rowStart; y < rowEnd; y += stepY) {
+                        const offset = (y * roiWidth + xLine) * 4;
+                        const r = roiData[offset];
+                        const g = roiData[offset + 1];
+                        const b = roiData[offset + 2];
+                        const brightness = (r + g + b) / 3;
+                        text += brightness > threshold ? '1' : '0';
+                    }
+                    text += '\n';
+                }
+            } else {
+                for (let y = rowStart; y < rowEnd; y += stepY) {
+                    for (let x = 0; x < roiWidth; x += stepX) {
+                        const offset = (y * roiWidth + x) * 4;
+                        const r = roiData[offset];
+                        const g = roiData[offset + 1];
+                        const b = roiData[offset + 2];
+                        const brightness = (r + g + b) / 3;
+                        text += brightness > threshold ? '1' : '0';
+                    }
+                    text += '\n';
+                }
+            }
+            return text;
+        }
+
+        function isRedPixel(r, g, b, redThreshold) {
+            const maxOther = Math.floor(redThreshold * 0.4);
+            return r >= redThreshold && g <= maxOther && b <= maxOther;
+        }
+
+        function groupBits(text, groupSize) {
+            const size = Math.max(1, parseInt(groupSize, 10) || 1);
+            if (size <= 1) {
+                return text;
+            }
+            const lines = text.split('\n');
+            const grouped = lines.map(line => {
+                if (!line) {
+                    return '';
+                }
+                const chunks = [];
+                for (let i = 0; i < line.length; i += size) {
+                    chunks.push(line.slice(i, i + size));
+                }
+                return chunks.join(' ');
+            });
+            return grouped.join('\n');
+        }
+
+        function findRedBandBounds(roiData, roiWidth, roiHeight, redRowFraction) {
+            const redThreshold = parseInt(redThresholdSlider.value, 10);
+            const redRows = [];
+
+            for (let y = 0; y < roiHeight; y++) {
+                let redCount = 0;
+                for (let x = 0; x < roiWidth; x++) {
+                    const offset = (y * roiWidth + x) * 4;
+                    const r = roiData[offset];
+                    const g = roiData[offset + 1];
+                    const b = roiData[offset + 2];
+                    if (isRedPixel(r, g, b, redThreshold)) {
+                        redCount++;
+                    }
+                }
+                if (redCount / roiWidth >= redRowFraction) {
+                    redRows.push(y);
+                }
+            }
+
+            if (redRows.length < 2) {
+                return { bounds: null, redRows };
+            }
+
+            const bands = [];
+            let start = redRows[0];
+            let prev = redRows[0];
+            for (let i = 1; i < redRows.length; i++) {
+                const row = redRows[i];
+                if (row === prev + 1) {
+                    prev = row;
+                } else {
+                    bands.push([start, prev]);
+                    start = row;
+                    prev = row;
+                }
+            }
+            bands.push([start, prev]);
+
+            if (bands.length < 2) {
+                return { bounds: null, redRows };
+            }
+
+            const topBand = bands[0];
+            const bottomBand = bands[bands.length - 1];
+            const top = topBand[1] + 1;
+            const bottom = bottomBand[0];
+            if (top >= bottom) {
+                return { bounds: null, redRows };
+            }
+            return { bounds: { top, bottom }, redRows };
+        }
+
+        function processFrame() {
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            if (!videoWidth || !videoHeight) {
+                animationId = requestAnimationFrame(processFrame);
+                return;
+            }
+
+            const roiWidth = Math.min(parseInt(widthSlider.value, 10), videoWidth);
+            const roiHeight = Math.min(parseInt(heightSlider.value, 10), videoHeight);
+            const x = Math.floor((videoWidth - roiWidth) / 2);
+            const y = Math.floor((videoHeight - roiHeight) / 2);
+
+            fullCanvas.width = videoWidth;
+            fullCanvas.height = videoHeight;
+            fullCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+            const imageData = fullCtx.getImageData(x, y, roiWidth, roiHeight);
+
+            fullCtx.strokeStyle = '#ffeb3b';
+            fullCtx.lineWidth = 4;
+            fullCtx.strokeRect(x, y, roiWidth, roiHeight);
+            const lineCount = parseInt(lineCountSlider.value, 10);
+            const lineSpacing = roiWidth / (lineCount + 1);
+            fullCtx.strokeStyle = '#4caf50';
+            fullCtx.lineWidth = 2;
+            for (let i = 1; i <= lineCount; i++) {
+                const xLine = Math.floor(x + lineSpacing * i);
+                fullCtx.beginPath();
+                fullCtx.moveTo(xLine, y);
+                fullCtx.lineTo(xLine, y + roiHeight);
+                fullCtx.stroke();
+            }
+
+            const binaryText = buildBinaryText(imageData.data, roiWidth, roiHeight, lineCount, linesOnlyToggle.checked);
+            output.textContent = binaryText;
+
+            const redRowFraction = parseInt(redRowPercentSlider.value, 10) / 100;
+            const detection = findRedBandBounds(imageData.data, roiWidth, roiHeight, redRowFraction);
+            if (showRedDebugToggle.checked) {
+                fullCtx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+                fullCtx.lineWidth = 1;
+                detection.redRows.forEach(row => {
+                    const yLine = y + row;
+                    fullCtx.beginPath();
+                    fullCtx.moveTo(x, yLine);
+                    fullCtx.lineTo(x + roiWidth, yLine);
+                    fullCtx.stroke();
+                });
+            }
+
+            if (detection.bounds) {
+                const filteredText = buildBinaryText(imageData.data, roiWidth, roiHeight, lineCount, linesOnlyToggle.checked, detection.bounds.top, detection.bounds.bottom);
+                filteredOutput.textContent = filteredText;
+                groupedOutput.textContent = groupBits(filteredText, bitGroupSize.value);
+            } else {
+                filteredOutput.textContent = 'No bands found';
+                groupedOutput.textContent = '';
+            }
+
+            animationId = requestAnimationFrame(processFrame);
+        }
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                if (!cameraSelect.options.length) {
+                    await refreshCameras(true);
+                }
+                const deviceId = cameraSelect.value || undefined;
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: buildVideoConstraints(deviceId)
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    clampWindowSize(video.videoWidth, video.videoHeight);
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    processFrame();
+                };
+            } catch (err) {
+                alert('Error accessing camera: ' + err.message);
+            }
+        });
+
+        function stopStream(resetUi) {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (video.srcObject) {
+                video.srcObject = null;
+            }
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            if (resetUi) {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                output.textContent = '';
+                groupedOutput.textContent = '';
+                filteredOutput.textContent = '';
+            }
+        }
+
+        stopBtn.addEventListener('click', () => {
+            stopStream(true);
+        });
+
+        cameraSelect.addEventListener('change', async () => {
+            if (!stream) {
+                return;
+            }
+            stopBtn.click();
+            startBtn.click();
+        });
+
+        window.addEventListener('pagehide', () => {
+            stopStream(false);
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopStream(false);
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                stopStream(false);
+            }
+        });
+
+        widthSlider.addEventListener('input', updateSliderLabels);
+        heightSlider.addEventListener('input', updateSliderLabels);
+        thresholdSlider.addEventListener('input', updateSliderLabels);
+        redThresholdSlider.addEventListener('input', updateSliderLabels);
+        redRowPercentSlider.addEventListener('input', updateSliderLabels);
+        lineCountSlider.addEventListener('input', updateSliderLabels);
+
+        updateSliderLabels();
+        refreshCameras(false).catch(() => {});
+    </script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bouncing Square</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background: #f1f1f1;
+      font-family: "Times New Roman", serif;
+    }
+    canvas {
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="400" height="300"></canvas>
+  <label class="speed-control">
+    Speed
+    <input id="speed" type="range" min="0.5" max="4" value="1" step="0.1">
+  </label>
+  <label class="speed-control">
+    Polygons
+    <input id="count" type="range" min="1" max="12" value="1" step="1">
+  </label>
+  <label class="speed-control">
+    Colors
+    <input id="colors" type="range" min="1" max="8" value="3" step="1">
+  </label>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const speedInput = document.getElementById('speed');
+    const countInput = document.getElementById('count');
+    const colorsInput = document.getElementById('colors');
+
+    const shapes = [];
+    const palette = ['#333', '#1e88e5', '#f4511e', '#43a047', '#8e24aa', '#fdd835', '#00838f', '#6d4c41'];
+
+    function createShape() {
+      const size = 26 + Math.random() * 24;
+      return {
+        size,
+        x: Math.random() * (canvas.width - size),
+        y: Math.random() * (canvas.height - size),
+        vx: (Math.random() * 3 + 1.5) * (Math.random() < 0.5 ? -1 : 1),
+        vy: (Math.random() * 3 + 1.5) * (Math.random() < 0.5 ? -1 : 1),
+        colorIndex: Math.floor(Math.random() * palette.length),
+        sides: 4
+      };
+    }
+
+    function drawPolygon(cx, cy, radius, sidesCount) {
+      if (sidesCount <= 2) return;
+      const step = (Math.PI * 2) / sidesCount;
+      ctx.beginPath();
+      for (let i = 0; i < sidesCount; i++) {
+        const angle = -Math.PI / 2 + i * step;
+        const x = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function step() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const speed = parseFloat(speedInput.value);
+      const targetCount = parseInt(countInput.value, 10);
+      const colorCount = Math.max(1, Math.min(palette.length, parseInt(colorsInput.value, 10)));
+      while (shapes.length < targetCount) shapes.push(createShape());
+      if (shapes.length > targetCount) shapes.length = targetCount;
+
+      for (let i = 0; i < shapes.length; i++) {
+        const shape = shapes[i];
+        ctx.fillStyle = palette[shape.colorIndex % colorCount];
+        const cx = shape.x + shape.size / 2;
+        const cy = shape.y + shape.size / 2;
+        drawPolygon(cx, cy, shape.size / 2, shape.sides);
+
+        shape.x += shape.vx * speed;
+        shape.y += shape.vy * speed;
+
+        if (shape.x <= 0 || shape.x + shape.size >= canvas.width) {
+          shape.vx *= -1;
+          shape.colorIndex = (shape.colorIndex + 1) % colorCount;
+          shape.sides = Math.max(3, Math.min(8, shape.sides + (Math.random() < 0.5 ? -1 : 1)));
+        }
+        if (shape.y <= 0 || shape.y + shape.size >= canvas.height) {
+          shape.vy *= -1;
+          shape.colorIndex = (shape.colorIndex + 1) % colorCount;
+          shape.sides = Math.max(3, Math.min(8, shape.sides + (Math.random() < 0.5 ? -1 : 1)));
+        }
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    step();
+  </script>
+</body>
+</html>

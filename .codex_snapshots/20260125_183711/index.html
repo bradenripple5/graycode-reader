@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Radial Binary Pattern</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    canvas {
+      display: block;
+      margin: 20px auto;
+      background: #eee;
+      border: 1px solid #ddd;
+    }
+    .controls {
+      margin: 20px 0;
+      text-align: center;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 5px 0 0;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .info {
+      color: #666;
+      font-size: 14px;
+      margin-top: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Radial Binary Pattern</h1>
+
+  <div class="container">
+    <div class="controls">
+      <label for="bandCount">Number of bands: <span id="bandCountVal">9</span></label>
+      <input id="bandCount" type="range" min="1" max="12" value="9">
+      <label for="circleSize">Circle radius: <span id="circleSizeVal">484</span>px</label>
+      <input id="circleSize" type="range" min="10" max="1000" value="484">
+      <label>
+        <input id="invertBits" type="checkbox">
+        Invert bits
+      </label>
+      <label>
+        <input id="reverseBits" type="checkbox">
+        Reverse bit order
+      </label>
+      <label>
+        <input id="labelMode" type="checkbox">
+        Show angles
+      </label>
+      <label>
+        <input id="showNumbers" type="checkbox" checked>
+        Show numbers
+      </label>
+      <label>
+        <input id="showGuides" type="checkbox" checked>
+        Show guide lines
+      </label>
+      <label>
+        <input id="showAngleGuides" type="checkbox">
+        Show 45° guides
+      </label>
+      <label>
+        <input id="showAngleGuides5" type="checkbox" checked>
+        Show 5° guides
+      </label>
+      <label>
+        <input id="showAngleWedges5" type="checkbox">
+        Show 5° blue wedges
+      </label>
+
+      <label for="centerGap">Center whitespace: <span id="centerGapVal">90</span>%</label>
+      <input id="centerGap" type="range" min="0" max="90" value="90">
+      <label for="angleOffset">Angle offset: <span id="angleOffsetVal">0</span>°</label>
+      <input id="angleOffset" type="range" min="0" max="359" value="0">
+      <label for="rotateSpeed">Rotation speed: <span id="rotateSpeedVal">30</span>°/s</label>
+      <input id="rotateSpeed" type="range" min="1" max="30" value="30">
+      <button id="rotateBtn">Start rotation</button>
+      <button id="reloadBtn">Regenerate</button>
+      <div class="info">Generated in the browser (Gray code)</div>
+    </div>
+
+    <canvas id="radialCanvas"></canvas>
+
+    <div class="info">Rows (rings)</div>
+    <textarea id="rowsOutput" readonly></textarea>
+
+    <div class="info">Columns (angular positions)</div>
+    <textarea id="colsOutput" readonly></textarea>
+
+  </div>
+
+  <script>
+    const baseRingWidth = 25;
+
+    function renderRadialPattern(
+      data,
+      canvas,
+      centerGapPercent,
+      angleOffsetDeg,
+      radiusPx,
+      showAngles,
+      showNumbers,
+      showGuides,
+      showAngleGuides,
+      showAngleGuides5,
+      showAngleWedges5
+    ) {
+      if (!data || data.length === 0) return;
+
+      const ctx = canvas.getContext('2d');
+      const numRings = data.length;
+      const maxRadius = numRings * baseRingWidth;
+      const scaledRadius = Math.max(1, radiusPx);
+      const gapRadius = (centerGapPercent / 100) * scaledRadius;
+      const ringWidth = (scaledRadius - gapRadius) / numRings;
+      const angleOffset = (angleOffsetDeg * Math.PI) / 180;
+      const markerThickness = Math.max(2, ringWidth);
+      const size = scaledRadius * 2 + 100 + markerThickness * 4;
+
+      canvas.width = size;
+      canvas.height = size;
+
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      ctx.fillStyle = '#EEEEEE';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (showAngleWedges5) {
+        drawAngleWedges(ctx, centerX, centerY, size / 2, 5, 'rgba(0, 0, 255, 0.2)');
+      }
+      if (showAngleGuides) {
+        drawAngleGuides(ctx, centerX, centerY, size / 2, 45, 'rgba(0, 140, 255, 0.75)', 1.2);
+      }
+      if (showAngleGuides5) {
+        drawAngleGuides(ctx, centerX, centerY, size / 2, 5, 'rgba(0, 0, 255, 0.45)', 0.8);
+      }
+
+      for (let ringIdx = 0; ringIdx < numRings; ringIdx++) {
+        const segments = data[ringIdx];
+        const numSegments = segments.length;
+        const innerRadius = gapRadius + ringIdx * ringWidth;
+        const outerRadius = gapRadius + (ringIdx + 1) * ringWidth;
+
+        for (let segIdx = 0; segIdx < numSegments; segIdx++) {
+          const value = segments[segIdx];
+
+          const startAngle = (segIdx / numSegments) * 2 * Math.PI + angleOffset;
+          const endAngle = ((segIdx + 1) / numSegments) * 2 * Math.PI + angleOffset;
+
+          ctx.fillStyle = value === 1 ? '#FFFFFF' : '#000';
+
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
+          ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = '#CCCCCC';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+
+      if (centerGapPercent > 0) {
+        const patternOuterRadius = gapRadius + numRings * ringWidth;
+        const blueInnerStart = Math.max(0, gapRadius - markerThickness);
+        const blueOuterStart = patternOuterRadius;
+
+        ctx.fillStyle = '#0000FF';
+        if (blueInnerStart < gapRadius) {
+          drawRing(ctx, centerX, centerY, blueInnerStart, gapRadius);
+        }
+        drawRing(ctx, centerX, centerY, blueOuterStart, blueOuterStart + markerThickness);
+      }
+
+      const labelRadius = computeLabelRadius(gapRadius + numRings * ringWidth, ringWidth);
+      if (showGuides) {
+        drawColumnGuides(ctx, centerX, centerY, labelRadius, data, angleOffset);
+      }
+      if (showNumbers) {
+        drawColumnLabels(
+          ctx,
+          centerX,
+          centerY,
+          labelRadius,
+          data,
+          angleOffset,
+          showAngles
+        );
+      }
+    }
+
+    function drawRing(ctx, cx, cy, innerRadius, outerRadius) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, outerRadius, 0, 2 * Math.PI);
+      ctx.arc(cx, cy, innerRadius, 2 * Math.PI, 0, true);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawAlternatingRing(ctx, cx, cy, innerRadius, outerRadius, rings, angleOffset) {
+      const columnCount = rings.length > 0 ? rings[0].length : 0;
+      if (columnCount <= 0) return;
+      for (let segIdx = 0; segIdx < columnCount; segIdx++) {
+        const startAngle = (segIdx / columnCount) * 2 * Math.PI + angleOffset;
+        const endAngle = ((segIdx + 1) / columnCount) * 2 * Math.PI + angleOffset;
+        ctx.fillStyle = segIdx % 2 === 0 ? '#2ecc71' : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerRadius, startAngle, endAngle);
+        ctx.arc(cx, cy, innerRadius, endAngle, startAngle, true);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    function columnValueFromRings(rings, colIndex) {
+      const sections = rings.length;
+      let value = 0;
+      for (let ringIdx = 0; ringIdx < sections; ringIdx++) {
+        const bit = rings[ringIdx][colIndex] ?? 0;
+        value = (value << 1) | (bit & 1);
+      }
+      return value;
+    }
+
+    function computeLabelRadius(outerRadius, ringWidth) {
+      const markerThickness = Math.max(2, ringWidth);
+      return outerRadius + markerThickness * 2 + Math.max(12, ringWidth * 0.6);
+    }
+
+    function drawColumnGuides(ctx, cx, cy, labelRadius, rings, angleOffset) {
+      const columnCount = rings.length > 0 ? rings[0].length : 0;
+      if (columnCount <= 0) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.lineWidth = 0.75;
+      for (let segIdx = 0; segIdx < columnCount; segIdx++) {
+        const angle = ((segIdx + 0.5) / columnCount) * 2 * Math.PI + angleOffset;
+        const x = cx + Math.cos(angle) * labelRadius;
+        const y = cy + Math.sin(angle) * labelRadius;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawAngleGuides(ctx, cx, cy, radius, stepDeg, strokeStyle, lineWidth) {
+      ctx.save();
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = lineWidth;
+      const steps = Math.max(1, Math.round(360 / stepDeg));
+      for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * 2 * Math.PI;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawAngleWedges(ctx, cx, cy, radius, stepDeg, fillStyle) {
+      ctx.save();
+      const steps = Math.max(1, Math.round(360 / stepDeg));
+      for (let i = 0; i < steps; i++) {
+        ctx.fillStyle = i % 2 === 0 ? fillStyle : '#FFFFFF';
+        const start = (i / steps) * 2 * Math.PI;
+        const end = ((i + 1) / steps) * 2 * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, end);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawColumnLabels(ctx, cx, cy, labelRadius, rings, angleOffset, showAngles) {
+      const columnCount = rings.length > 0 ? rings[0].length : 0;
+      if (columnCount <= 0) return;
+      const arcPerColumn = (2 * Math.PI * labelRadius) / columnCount;
+
+      ctx.save();
+      ctx.fillStyle = '#222222';
+      ctx.font = '12px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const maxValue = String(Math.max(0, (1 << rings.length) - 1));
+      const maxLabel = showAngles ? `${maxValue} 360°` : maxValue;
+      const maxLabelWidth = ctx.measureText(maxLabel).width;
+      const minSpacing = maxLabelWidth + 6;
+      const step = Math.max(1, Math.ceil(minSpacing / arcPerColumn));
+
+      for (let segIdx = 0; segIdx < columnCount; segIdx += step) {
+        const angle = (segIdx / columnCount) * 2 * Math.PI + angleOffset;
+        const x = cx + Math.cos(angle) * labelRadius;
+        const y = cy + Math.sin(angle) * labelRadius;
+        const value = columnValueFromRings(rings, segIdx);
+        const angleDeg = ((angle * 180) / Math.PI + 360) % 360;
+        const labelText = showAngles ? `${value} ${Math.round(angleDeg)}°` : String(value);
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.fillText(labelText, 0, 0);
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function grayCode(value) {
+      return value ^ (value >> 1);
+    }
+
+    function generateRings(sections, invert, reverse) {
+      const columns = 1 << sections;
+      const rings = Array.from({ length: sections }, () => []);
+      for (let col = 0; col < columns; col++) {
+        const code = grayCode(col);
+        for (let bit = 0; bit < sections; bit++) {
+          const ringIdx = bit;
+          const bitIdx = reverse ? bit : (sections - 1 - bit);
+          let value = (code >> bitIdx) & 1;
+          if (invert) value = value ^ 1;
+          rings[ringIdx].push(value);
+        }
+      }
+      return rings;
+    }
+
+    function ringsToColumns(rings) {
+      const ringCount = rings.length;
+      if (ringCount === 0) return [];
+      const cols = rings[0].length;
+      const columns = [];
+      for (let c = 0; c < cols; c++) {
+        const col = [];
+        for (let r = 0; r < ringCount; r++) {
+          col.push(rings[r][c] ?? 0);
+        }
+        columns.push(col);
+      }
+      return columns;
+    }
+
+    function renderFromControls() {
+      const canvas = document.getElementById('radialCanvas');
+      const bandInput = document.getElementById('bandCount');
+      const bandVal = document.getElementById('bandCountVal');
+      const sizeInput = document.getElementById('circleSize');
+      const sizeVal = document.getElementById('circleSizeVal');
+      const invertInput = document.getElementById('invertBits');
+      const reverseInput = document.getElementById('reverseBits');
+      const labelModeInput = document.getElementById('labelMode');
+      const showNumbersInput = document.getElementById('showNumbers');
+      const showGuidesInput = document.getElementById('showGuides');
+      const showAngleGuidesInput = document.getElementById('showAngleGuides');
+      const showAngleGuides5Input = document.getElementById('showAngleGuides5');
+      const showAngleWedges5Input = document.getElementById('showAngleWedges5');
+      const gapInput = document.getElementById('centerGap');
+      const gapVal = document.getElementById('centerGapVal');
+      const angleInput = document.getElementById('angleOffset');
+      const angleVal = document.getElementById('angleOffsetVal');
+      const speedInput = document.getElementById('rotateSpeed');
+      const speedVal = document.getElementById('rotateSpeedVal');
+      const rowsOutput = document.getElementById('rowsOutput');
+      const colsOutput = document.getElementById('colsOutput');
+
+      const sections = parseInt(bandInput.value, 10);
+      const defaultRadius = sections * baseRingWidth;
+      const maxRadius = Math.max(defaultRadius * 10, 10);
+      sizeInput.max = String(Math.round(maxRadius));
+      if (sizeInput.value === "0") {
+        sizeInput.value = "300";
+      }
+
+      const radiusPx = parseInt(sizeInput.value, 10);
+      const invert = invertInput.checked;
+      const reverse = reverseInput.checked;
+      const showAngles = labelModeInput.checked;
+      const showNumbers = showNumbersInput.checked;
+      const showGuides = showGuidesInput.checked;
+      const showAngleGuides = showAngleGuidesInput.checked;
+      const showAngleGuides5 = showAngleGuides5Input.checked;
+      const showAngleWedges5 = showAngleWedges5Input.checked;
+      const gapPercent = parseInt(gapInput.value, 10);
+      const angleOffset = autoRotate ? currentAngle : parseFloat(angleInput.value);
+      if (!autoRotate) {
+        currentAngle = angleOffset;
+      }
+      const displayAngle = ((angleOffset % 360) + 360) % 360;
+
+      bandVal.textContent = sections;
+      sizeVal.textContent = radiusPx;
+      gapVal.textContent = gapPercent;
+      angleVal.textContent = String(Math.round(displayAngle));
+      speedVal.textContent = speedInput.value;
+
+      const rings = generateRings(sections, invert, reverse);
+      renderRadialPattern(
+        rings,
+        canvas,
+        gapPercent,
+        angleOffset,
+        radiusPx,
+        showAngles,
+        showNumbers,
+        showGuides,
+        showAngleGuides,
+        showAngleGuides5,
+        showAngleWedges5
+      );
+
+      const rowsText = rings.map(row => row.join(',')).join('\n');
+      const columns = ringsToColumns(rings);
+      const colsText = columns.map(col => col.join(',')).join('\n');
+      rowsOutput.value = rowsText;
+      colsOutput.value = colsText;
+    }
+
+    let autoRotate = false;
+    let lastFrameTime = 0;
+    let currentAngle = 0;
+
+    function stepRotation(timestamp) {
+      if (!autoRotate) return;
+      if (!lastFrameTime) lastFrameTime = timestamp;
+      const deltaSec = (timestamp - lastFrameTime) / 1000;
+      lastFrameTime = timestamp;
+
+      const angleInput = document.getElementById('angleOffset');
+      const speedInput = document.getElementById('rotateSpeed');
+      const speed = parseFloat(speedInput.value);
+      currentAngle += speed * deltaSec;
+      const displayAngle = ((currentAngle % 360) + 360) % 360;
+      angleInput.value = String(displayAngle);
+      renderFromControls();
+      requestAnimationFrame(stepRotation);
+    }
+
+    document.getElementById('bandCount').addEventListener('input', renderFromControls);
+    document.getElementById('circleSize').addEventListener('input', renderFromControls);
+    document.getElementById('invertBits').addEventListener('change', renderFromControls);
+    document.getElementById('reverseBits').addEventListener('change', renderFromControls);
+    document.getElementById('labelMode').addEventListener('change', renderFromControls);
+    document.getElementById('showNumbers').addEventListener('change', renderFromControls);
+    document.getElementById('showGuides').addEventListener('change', renderFromControls);
+    document.getElementById('showAngleGuides').addEventListener('change', renderFromControls);
+    document.getElementById('showAngleGuides5').addEventListener('change', renderFromControls);
+    document.getElementById('showAngleWedges5').addEventListener('change', renderFromControls);
+    document.getElementById('centerGap').addEventListener('input', renderFromControls);
+    document.getElementById('angleOffset').addEventListener('input', renderFromControls);
+    document.getElementById('rotateSpeed').addEventListener('input', renderFromControls);
+    document.getElementById('reloadBtn').addEventListener('click', renderFromControls);
+    document.getElementById('rotateBtn').addEventListener('click', () => {
+      autoRotate = !autoRotate;
+      const button = document.getElementById('rotateBtn');
+      button.textContent = autoRotate ? 'Stop rotation' : 'Start rotation';
+      if (autoRotate) {
+        lastFrameTime = 0;
+        requestAnimationFrame(stepRotation);
+      }
+    });
+    window.onload = renderFromControls;
+  </script>
+  <script>
+    const reloadEvents = new EventSource('/events');
+    reloadEvents.onmessage = (event) => {
+      if (event.data === 'reload') {
+        window.location.reload();
+      }
+    };
+  </script>
+</body>
+</html>

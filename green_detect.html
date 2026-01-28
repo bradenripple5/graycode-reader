@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Green Square Detector</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .controls.collapsed {
+      display: none;
+    }
+    .toggle-btn {
+      background: #222;
+      color: #fff;
+      border: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 4px;
+      font-size: 18px;
+      line-height: 34px;
+      text-align: center;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .controls label {
+      font-size: 14px;
+      color: #333;
+    }
+    .controls input[type="range"] {
+      width: 160px;
+      vertical-align: middle;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .binary-columns {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 13px;
+      color: #111;
+      background: #f0f0f0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-height: 26px;
+    }
+    .binary-columns .col {
+      white-space: nowrap;
+    }
+    .canvas-wrap {
+      position: relative;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #111;
+      border-radius: 6px;
+    }
+    .info {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #666;
+    }
+    .metric {
+      font-size: 14px;
+      color: #145a32;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Green Square Detector</h1>
+  <div class="container">
+    <button id="toggleControls" class="toggle-btn" title="Toggle controls">+</button>
+    <div class="controls">
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <div class="metric">
+        Detections: <span id="squareCount">0</span>
+      </div>
+      <label>
+        <input type="radio" name="detectMode" value="blue" checked>
+        Blue band intersections
+      </label>
+      <label>
+        <input type="radio" name="detectMode" value="green">
+        Green squares
+      </label>
+      <label>
+        Min green: <span id="minGreenVal">120</span>
+        <input id="minGreen" type="range" min="0" max="255" value="120">
+      </label>
+      <label>
+        Green delta: <span id="deltaVal">40</span>
+        <input id="delta" type="range" min="0" max="255" value="40">
+      </label>
+      <label>
+        Min area: <span id="minAreaVal">1</span>
+        <input id="minArea" type="range" min="1" max="100" value="1">
+      </label>
+      <label>
+        Downscale width: <span id="downscaleVal">600</span>
+        <input id="downscale" type="range" min="160" max="800" value="600" step="20">
+      </label>
+      <label>
+        Max neighbor dist: <span id="maxNeighborVal">60</span>
+        <input id="maxNeighbor" type="range" min="5" max="200" value="60" step="5">
+      </label>
+      <label>
+        Sections: <span id="sectionsVal">12</span>
+        <input id="sections" type="range" min="4" max="64" value="12" step="1">
+      </label>
+      <label>
+        Center avg window: <span id="centerWindowVal">5</span>
+        <input id="centerWindow" type="range" min="1" max="30" value="5" step="1">
+      </label>
+    </div>
+
+    <div class="binary-columns" id="binaryColumns"></div>
+    <div class="canvas-wrap">
+      <canvas id="preview"></canvas>
+    </div>
+    <div class="info" id="status">Idle.</div>
+  </div>
+
+  <video id="video" autoplay playsinline style="display:none;"></video>
+
+  <script>
+    const video = document.getElementById('video');
+    const preview = document.getElementById('preview');
+    const ctx = preview.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const minGreen = document.getElementById('minGreen');
+    const delta = document.getElementById('delta');
+    const minArea = document.getElementById('minArea');
+    const downscale = document.getElementById('downscale');
+    const minGreenVal = document.getElementById('minGreenVal');
+    const deltaVal = document.getElementById('deltaVal');
+    const minAreaVal = document.getElementById('minAreaVal');
+    const downscaleVal = document.getElementById('downscaleVal');
+    const squareCount = document.getElementById('squareCount');
+    const maxNeighbor = document.getElementById('maxNeighbor');
+    const maxNeighborVal = document.getElementById('maxNeighborVal');
+    const sections = document.getElementById('sections');
+    const sectionsVal = document.getElementById('sectionsVal');
+    const centerWindow = document.getElementById('centerWindow');
+    const centerWindowVal = document.getElementById('centerWindowVal');
+    const detectModeInputs = document.querySelectorAll('input[name="detectMode"]');
+    const binaryColumns = document.getElementById('binaryColumns');
+    const controls = document.querySelector('.controls');
+    const toggleControls = document.getElementById('toggleControls');
+
+    let stream = null;
+    let animationId = null;
+    let workCanvas = document.createElement('canvas');
+    let workCtx = workCanvas.getContext('2d');
+    let lastNCenters = [];
+
+    function updateLabels() {
+      minGreenVal.textContent = minGreen.value;
+      deltaVal.textContent = delta.value;
+      minAreaVal.textContent = minArea.value;
+      downscaleVal.textContent = downscale.value;
+      maxNeighborVal.textContent = maxNeighbor.value;
+      sectionsVal.textContent = sections.value;
+      centerWindowVal.textContent = centerWindow.value;
+    }
+
+    function currentDetectMode() {
+      for (let i = 0; i < detectModeInputs.length; i++) {
+        if (detectModeInputs[i].checked) return detectModeInputs[i].value;
+      }
+      return 'blue';
+    }
+
+    function clusterByNearest(points, maxDist) {
+      if (!points.length) return [];
+
+      const visited = new Array(points.length).fill(false);
+      const clusters = [];
+
+      while (true) {
+        let startIdx = -1;
+        for (let i = 0; i < points.length; i++) {
+          if (!visited[i]) {
+            startIdx = i;
+            break;
+          }
+        }
+        if (startIdx === -1) break;
+
+        const cluster = [];
+        let currentIdx = startIdx;
+        visited[currentIdx] = true;
+        cluster.push(points[currentIdx]);
+
+        while (true) {
+          let nearestIdx = -1;
+          let nearestDist = Infinity;
+          const current = points[currentIdx];
+
+          for (let i = 0; i < points.length; i++) {
+            if (visited[i]) continue;
+            const dx = points[i].x - current.x;
+            const dy = points[i].y - current.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearestIdx = i;
+            }
+          }
+
+          if (nearestIdx === -1 || nearestDist > maxDist) break;
+
+          visited[nearestIdx] = true;
+          cluster.push(points[nearestIdx]);
+          currentIdx = nearestIdx;
+        }
+
+        clusters.push(cluster);
+      }
+
+      return clusters;
+    }
+
+    function fitCircleKasa(points) {
+      if (points.length < 3) return null;
+
+      let sumX = 0;
+      let sumY = 0;
+      let sumX2 = 0;
+      let sumY2 = 0;
+      let sumXY = 0;
+      let sumX3 = 0;
+      let sumY3 = 0;
+      let sumX2Y = 0;
+      let sumXY2 = 0;
+
+      for (let i = 0; i < points.length; i++) {
+        const x = points[i].x;
+        const y = points[i].y;
+        const x2 = x * x;
+        const y2 = y * y;
+        sumX += x;
+        sumY += y;
+        sumX2 += x2;
+        sumY2 += y2;
+        sumXY += x * y;
+        sumX3 += x2 * x;
+        sumY3 += y2 * y;
+        sumX2Y += x2 * y;
+        sumXY2 += x * y2;
+      }
+
+      const n = points.length;
+      const c = n * sumX2 - sumX * sumX;
+      const d = n * sumXY - sumX * sumY;
+      const e = n * sumX3 + n * sumXY2 - (sumX2 + sumY2) * sumX;
+      const g = n * sumY2 - sumY * sumY;
+      const h = n * sumX2Y + n * sumY3 - (sumX2 + sumY2) * sumY;
+      const denom = 2 * (c * g - d * d);
+
+      if (Math.abs(denom) < 1e-12) return null;
+
+      const cx = (g * e - d * h) / denom;
+      const cy = (c * h - d * e) / denom;
+      const r = Math.sqrt(
+        (sumX2 - 2 * cx * sumX + n * cx * cx +
+          sumY2 - 2 * cy * sumY + n * cy * cy) / n
+      );
+
+      return { cx, cy, r };
+    }
+
+    function findArcSpan(points, cx, cy) {
+      if (points.length < 2) return null;
+      const angles = points.map((p) => Math.atan2(p.y - cy, p.x - cx));
+      angles.sort((a, b) => a - b);
+      if (angles.length === 2) {
+        return { start: angles[0], end: angles[1] };
+      }
+
+      let maxGap = -1;
+      let gapIndex = -1;
+      for (let i = 0; i < angles.length; i++) {
+        const a = angles[i];
+        const b = angles[(i + 1) % angles.length];
+        const gap = i + 1 < angles.length ? b - a : (b + Math.PI * 2) - a;
+        if (gap > maxGap) {
+          maxGap = gap;
+          gapIndex = i;
+        }
+      }
+
+      if (gapIndex === -1) return null;
+      const start = angles[(gapIndex + 1) % angles.length];
+      const end = angles[gapIndex];
+      return { start, end };
+    }
+
+    function median(values) {
+      if (!values.length) return null;
+      const sorted = values.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    }
+
+    function meanRadius(points, cx, cy) {
+      if (!points.length) return 0;
+      let sum = 0;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - cx;
+        const dy = points[i].y - cy;
+        sum += Math.hypot(dx, dy);
+      }
+      return sum / points.length;
+    }
+
+    function inferArcAngles(points, cx, cy, arc) {
+      if (points.length < 2) return [];
+      const angles = points.map((p) => {
+        let a = Math.atan2(p.y - cy, p.x - cx);
+        if (a < 0) a += Math.PI * 2;
+        return a;
+      });
+      angles.sort((a, b) => a - b);
+
+      const gaps = [];
+      for (let i = 0; i < angles.length; i++) {
+        const a = angles[i];
+        const b = i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2;
+        gaps.push(b - a);
+      }
+      const step = median(gaps);
+      if (!step || step <= 0) return [];
+
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= Math.PI * 2;
+
+      let base = angles[0];
+      while (base < arcEnd) base += Math.PI * 2;
+      while (base > arcStart) base -= Math.PI * 2;
+
+      let first = base;
+      while (first - step >= arcEnd) first -= step;
+
+      const inferred = [];
+      const maxLines = 200;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        inferred.push(a);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+
+    function inferArcAnglesFromCommonSpacing(points, cx, cy, arc, minPoints) {
+      if (!arc || points.length < minPoints) return [];
+      const twoPi = Math.PI * 2;
+      const angles = points
+        .map((p) => {
+          let a = Math.atan2(p.y - cy, p.x - cx);
+          if (a < 0) a += twoPi;
+          return a;
+        })
+        .sort((a, b) => a - b);
+
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= twoPi;
+
+      const normalized = angles
+        .map((angle) => {
+          let a = angle;
+          while (a > arcStart) a -= twoPi;
+          while (a <= arcEnd) a += twoPi;
+          return a;
+        })
+        .filter((angle) => angle > arcEnd - 1e-6 && angle <= arcStart + 1e-6)
+        .sort((a, b) => a - b);
+
+      if (normalized.length < minPoints) return [];
+
+      const gaps = [];
+      for (let i = 0; i + 1 < normalized.length; i++) {
+        gaps.push(normalized[i + 1] - normalized[i]);
+      }
+      const step = median(gaps);
+      if (!step || step <= 0) return [];
+
+      let first = normalized[0];
+      while (first - step >= arcEnd) first -= step;
+
+      const inferred = [];
+      const maxLines = 300;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        let wrapped = a % twoPi;
+        if (wrapped < 0) wrapped += twoPi;
+        inferred.push(wrapped);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+
+    function inferArcAnglesFromDistance(points, cx, cy, arc, maxDist) {
+      if (points.length < 2) return [];
+      const r = meanRadius(points, cx, cy);
+      if (r <= 0) return [];
+      const distances = [];
+      for (let i = 0; i < points.length; i++) {
+        let nearestDist = Infinity;
+        for (let j = 0; j < points.length; j++) {
+          if (i === j) continue;
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < nearestDist) nearestDist = dist;
+        }
+        if (nearestDist !== Infinity && nearestDist <= maxDist) {
+          distances.push(nearestDist);
+        }
+      }
+      const commonDist = median(distances);
+      if (!commonDist || commonDist <= 0 || commonDist > 2 * r) return [];
+      const baseAngle = 2 * Math.asin(commonDist / (2 * r));
+      if (!baseAngle || baseAngle <= 0) return [];
+      const step = baseAngle / 2;
+      if (!step || step <= 0) return [];
+
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= Math.PI * 2;
+
+      const rawAngles = points.map((p) => Math.atan2(p.y - cy, p.x - cx));
+      const ref = rawAngles.length ? rawAngles[0] : arcStart;
+      let first = ref;
+      while (first > arcStart) first -= step;
+      while (first + step <= arcEnd) first += step;
+
+      const inferred = [];
+      const maxLines = 300;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        inferred.push(a);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+
+    function sampleLineBits(imageData, x1, y1, x2, y2, sectionCount) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const bits = [];
+      const gMin = parseInt(minGreen.value, 10);
+      const dMin = parseInt(delta.value, 10);
+
+      for (let i = 0; i < sectionCount; i++) {
+        const t = (i + 0.5) / sectionCount;
+        const x = Math.round(x1 + (x2 - x1) * t);
+        const y = Math.round(y1 + (y2 - y1) * t);
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+          bits.push(0);
+          continue;
+        }
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        bits.push(g >= gMin && g - r >= dMin && g - b >= dMin ? 1 : 0);
+      }
+
+      return bits;
+    }
+
+    function buildVideoConstraints() {
+      return { facingMode: { ideal: 'environment' } };
+    }
+
+    function stopStream(resetUi) {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      if (video.srcObject) {
+        video.srcObject = null;
+      }
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      if (resetUi) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        statusEl.textContent = 'Idle.';
+      }
+    }
+
+    function detectGreenCenters(imageData, width, height, areaThreshold) {
+      const data = imageData.data;
+      const mask = new Uint8Array(width * height);
+      const gMin = parseInt(minGreen.value, 10);
+      const dMin = parseInt(delta.value, 10);
+      const centers = [];
+
+      for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        if (g >= gMin && g - r >= dMin && g - b >= dMin) {
+          mask[i] = 1;
+        }
+      }
+
+      const stack = [];
+      const w = width;
+      const h = height;
+      for (let idx = 0; idx < mask.length; idx++) {
+        if (mask[idx] !== 1) continue;
+        mask[idx] = 2;
+        stack.length = 0;
+        stack.push(idx);
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        while (stack.length) {
+          const cur = stack.pop();
+          const y = Math.floor(cur / w);
+          const x = cur - y * w;
+          sumX += x;
+          sumY += y;
+          count += 1;
+
+          const left = cur - 1;
+          const right = cur + 1;
+          const up = cur - w;
+          const down = cur + w;
+
+          if (x > 0 && mask[left] === 1) {
+            mask[left] = 2;
+            stack.push(left);
+          }
+          if (x + 1 < w && mask[right] === 1) {
+            mask[right] = 2;
+            stack.push(right);
+          }
+          if (y > 0 && mask[up] === 1) {
+            mask[up] = 2;
+            stack.push(up);
+          }
+          if (y + 1 < h && mask[down] === 1) {
+            mask[down] = 2;
+            stack.push(down);
+          }
+        }
+        if (count >= areaThreshold) {
+          centers.push({
+            x: sumX / count,
+            y: sumY / count,
+            area: count
+          });
+        }
+      }
+
+      return centers;
+    }
+
+    function isBluePixel(r, g, b) {
+      return b >= 200 && r <= 60 && g <= 60 && b - Math.max(r, g) >= 120;
+    }
+
+    function detectBlueIntersections(imageData, width, height, angleStepDeg) {
+      const data = imageData.data;
+      const cx = width / 2;
+      const cy = height / 2;
+      const maxR = Math.min(cx, cy);
+      const step = (angleStepDeg * Math.PI) / 180;
+      const points = [];
+
+      for (let angle = 0; angle < Math.PI * 2 - 1e-6; angle += step) {
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        let inBlue = false;
+        let runStart = 0;
+        let lastBlue = 0;
+
+        for (let r = 0; r <= maxR; r += 1) {
+          const x = Math.round(cx + r * cosA);
+          const y = Math.round(cy + r * sinA);
+          if (x < 0 || x >= width || y < 0 || y >= height) break;
+          const idx = (y * width + x) * 4;
+          const pr = data[idx];
+          const pg = data[idx + 1];
+          const pb = data[idx + 2];
+          if (isBluePixel(pr, pg, pb)) {
+            if (!inBlue) {
+              inBlue = true;
+              runStart = r;
+            }
+            lastBlue = r;
+          } else if (inBlue) {
+            const runLen = lastBlue - runStart + 1;
+            if (runLen >= 2) {
+              const midR = runStart + runLen / 2;
+              points.push({
+                x: cx + midR * cosA,
+                y: cy + midR * sinA
+              });
+            }
+            inBlue = false;
+          }
+        }
+        if (inBlue) {
+          const runLen = lastBlue - runStart + 1;
+          if (runLen >= 2) {
+            const midR = runStart + runLen / 2;
+            points.push({
+              x: cx + midR * cosA,
+              y: cy + midR * sinA
+            });
+          }
+        }
+      }
+
+      return points;
+    }
+
+    function processFrame() {
+      if (!video.videoWidth || !video.videoHeight) {
+        animationId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      const targetWidth = parseInt(downscale.value, 10);
+      const scale = targetWidth / video.videoWidth;
+      const targetHeight = Math.max(1, Math.round(video.videoHeight * scale));
+
+      workCanvas.width = targetWidth;
+      workCanvas.height = targetHeight;
+      workCtx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+      const imageData = workCtx.getImageData(0, 0, targetWidth, targetHeight);
+      const mode = currentDetectMode();
+
+      preview.width = video.videoWidth;
+      preview.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, preview.width, preview.height);
+
+      if (mode === 'blue') {
+        const intersections = detectBlueIntersections(
+          imageData,
+          targetWidth,
+          targetHeight,
+          5
+        );
+        const fullIntersections = intersections.map((point) => ({
+          x: point.x / scale,
+          y: point.y / scale
+        }));
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+        for (let i = 0; i < fullIntersections.length; i++) {
+          const x = fullIntersections[i].x;
+          const y = fullIntersections[i].y;
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        statusEl.textContent = `Detected ${fullIntersections.length} blue intersections`;
+        squareCount.textContent = fullIntersections.length;
+        binaryColumns.textContent = '';
+        lastNCenters.length = 0;
+      } else {
+        const centers = detectGreenCenters(
+          imageData,
+          targetWidth,
+          targetHeight,
+          parseInt(minArea.value, 10)
+        );
+        const fullCenters = centers.map((center, idx) => ({
+          x: center.x / scale,
+          y: center.y / scale,
+          id: idx
+        }));
+        const clusters = clusterByNearest(
+          fullCenters,
+          parseInt(maxNeighbor.value, 10)
+        );
+        const arcClusters = clusters
+          .slice()
+          .sort((a, b) => b.length - a.length)
+          .slice(0, 2);
+        const arcFits = arcClusters.map((cluster) => ({
+          cluster,
+          fit: fitCircleKasa(cluster)
+        }));
+        const validFits = arcFits.filter((item) => item.fit);
+        let sharedCenter = null;
+        if (validFits.length === 2) {
+          const sortedFits = validFits.slice().sort((a, b) => a.fit.r - b.fit.r);
+          const small = sortedFits[0];
+          const large = sortedFits[1];
+          const candidate = {
+            cx: (small.fit.cx + large.fit.cx) / 2,
+            cy: (small.fit.cy + large.fit.cy) / 2
+          };
+          const smallMean = meanRadius(small.cluster, candidate.cx, candidate.cy);
+          if (Math.abs(smallMean - small.fit.r) > 30) {
+            sharedCenter = { cx: large.fit.cx, cy: large.fit.cy };
+          } else {
+            sharedCenter = candidate;
+          }
+        } else if (validFits.length === 1) {
+          sharedCenter = {
+            cx: validFits[0].fit.cx,
+            cy: validFits[0].fit.cy
+          };
+        }
+        if (sharedCenter) {
+          const windowSize = parseInt(centerWindow.value, 10);
+          if (windowSize > 1) {
+            lastNCenters.push({ cx: sharedCenter.cx, cy: sharedCenter.cy });
+            if (lastNCenters.length > windowSize) {
+              lastNCenters.splice(0, lastNCenters.length - windowSize);
+            }
+            if (lastNCenters.length === windowSize) {
+              let sumX = 0;
+              let sumY = 0;
+              for (let i = 0; i < lastNCenters.length; i++) {
+                sumX += lastNCenters[i].cx;
+                sumY += lastNCenters[i].cy;
+              }
+              sharedCenter = {
+                cx: sumX / windowSize,
+                cy: sumY / windowSize
+              };
+            }
+          } else {
+            lastNCenters.length = 0;
+          }
+        } else {
+          lastNCenters.length = 0;
+        }
+
+        const arcInfos = sharedCenter
+          ? arcFits.map((item) => {
+            if (!item.fit) return null;
+            const r = meanRadius(item.cluster, sharedCenter.cx, sharedCenter.cy);
+            const arc = findArcSpan(
+              item.cluster,
+              sharedCenter.cx,
+              sharedCenter.cy
+            );
+            let inferred = [];
+            if (arc) {
+              inferred = inferArcAnglesFromCommonSpacing(
+                item.cluster,
+                sharedCenter.cx,
+                sharedCenter.cy,
+                arc,
+                5
+              );
+              if (!inferred.length) {
+                inferred = inferArcAnglesFromDistance(
+                  item.cluster,
+                  sharedCenter.cx,
+                  sharedCenter.cy,
+                  arc,
+                  parseInt(maxNeighbor.value, 10)
+                );
+              }
+            }
+            return { cluster: item.cluster, arc, r, inferred };
+          }).filter(Boolean)
+          : [];
+
+        ctx.save();
+        const arcColors = [
+          'rgba(255, 0, 0, 0.85)',
+          'rgba(0, 170, 255, 0.85)',
+          'rgba(255, 150, 0, 0.85)',
+          'rgba(0, 200, 120, 0.85)'
+        ];
+        ctx.fillStyle = arcColors[0];
+        ctx.strokeStyle = arcColors[0];
+        ctx.lineWidth = 2;
+        fullCenters.forEach(center => {
+          const x = center.x;
+          const y = center.y;
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        arcClusters.forEach((cluster, idx) => {
+          if (cluster.length < 2) return;
+          const color = arcColors[idx % arcColors.length];
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(cluster[0].x, cluster[0].y);
+          for (let i = 1; i < cluster.length; i++) {
+            ctx.lineTo(cluster[i].x, cluster[i].y);
+          }
+          ctx.stroke();
+        });
+        arcClusters.forEach((cluster) => {
+          if (cluster.length < 2) return;
+          const pairSet = new Set();
+          const maxDist = parseInt(maxNeighbor.value, 10);
+          ctx.strokeStyle = 'rgba(0, 200, 0, 0.6)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+            for (let j = 0; j < cluster.length; j++) {
+              if (i === j) continue;
+              const dx = cluster[j].x - cluster[i].x;
+              const dy = cluster[j].y - cluster[i].y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestIdx = j;
+              }
+            }
+            if (nearestIdx === -1 || nearestDist > maxDist) continue;
+            const a = cluster[i].id;
+            const b = cluster[nearestIdx].id;
+            const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+            if (pairSet.has(key)) continue;
+            pairSet.add(key);
+            ctx.moveTo(cluster[i].x, cluster[i].y);
+            ctx.lineTo(cluster[nearestIdx].x, cluster[nearestIdx].y);
+          }
+          ctx.stroke();
+        });
+        arcInfos.forEach((info) => {
+          if (!sharedCenter) return;
+          const { cluster, arc, r, inferred } = info;
+          const cx = sharedCenter.cx;
+          const cy = sharedCenter.cy;
+          if (arc) {
+            ctx.strokeStyle = 'rgba(0, 120, 255, 0.6)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, arc.start, arc.end, true);
+            ctx.stroke();
+          }
+          if (cluster.length < 2) return;
+          if (arc) {
+            if (inferred.length) {
+              ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+              ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              for (let i = 0; i < inferred.length; i++) {
+                const angle = inferred[i];
+                const x = cx + r * Math.cos(angle);
+                const y = cy + r * Math.sin(angle);
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(x, y);
+              }
+              ctx.stroke();
+            }
+          }
+
+          ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cluster[i].x, cluster[i].y);
+          }
+          ctx.stroke();
+
+          const pairSet = new Set();
+          const maxDist = parseInt(maxNeighbor.value, 10);
+          ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+            for (let j = 0; j < cluster.length; j++) {
+              if (i === j) continue;
+              const dx = cluster[j].x - cluster[i].x;
+              const dy = cluster[j].y - cluster[i].y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestIdx = j;
+              }
+            }
+            if (nearestIdx === -1 || nearestDist > maxDist) continue;
+            const a = cluster[i].id;
+            const b = cluster[nearestIdx].id;
+            const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+            if (pairSet.has(key)) continue;
+            pairSet.add(key);
+            const midX = (cluster[i].x + cluster[nearestIdx].x) / 2;
+            const midY = (cluster[i].y + cluster[nearestIdx].y) / 2;
+            ctx.moveTo(midX, midY);
+            ctx.lineTo(cx, cy);
+          }
+          ctx.stroke();
+        });
+        ctx.restore();
+
+        if (sharedCenter && arcInfos.length === 2) {
+          const sortedArcs = arcInfos.slice().sort((a, b) => a.r - b.r);
+          const inner = sortedArcs[0];
+          const outer = sortedArcs[1];
+          const angles = outer.inferred;
+          if (angles.length) {
+            const frameData = ctx.getImageData(0, 0, preview.width, preview.height);
+            const sectionCount = parseInt(sections.value, 10);
+            const columns = angles.map((angle) => {
+              const x1 = sharedCenter.cx + inner.r * Math.cos(angle);
+              const y1 = sharedCenter.cy + inner.r * Math.sin(angle);
+              const x2 = sharedCenter.cx + outer.r * Math.cos(angle);
+              const y2 = sharedCenter.cy + outer.r * Math.sin(angle);
+              return sampleLineBits(frameData, x1, y1, x2, y2, sectionCount);
+            });
+            binaryColumns.innerHTML = columns
+              .map((bits) => `<div class="col">${bits.join(' ')}</div>`)
+              .join('');
+          } else {
+            binaryColumns.textContent = '';
+          }
+        } else {
+          binaryColumns.textContent = '';
+        }
+
+        statusEl.textContent = `Detected ${centers.length} green regions in ${arcClusters.length} arcs`;
+        squareCount.textContent = centers.length;
+      }
+      animationId = requestAnimationFrame(processFrame);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: buildVideoConstraints()
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+          statusEl.textContent = 'Running...';
+          processFrame();
+        };
+      } catch (err) {
+        alert('Error accessing camera: ' + err.message);
+      }
+    });
+
+    stopBtn.addEventListener('click', () => stopStream(true));
+    window.addEventListener('pagehide', () => stopStream(false));
+    window.addEventListener('beforeunload', () => stopStream(false));
+
+    minGreen.addEventListener('input', updateLabels);
+    delta.addEventListener('input', updateLabels);
+    minArea.addEventListener('input', updateLabels);
+    downscale.addEventListener('input', updateLabels);
+    maxNeighbor.addEventListener('input', updateLabels);
+    sections.addEventListener('input', updateLabels);
+    centerWindow.addEventListener('input', updateLabels);
+    detectModeInputs.forEach((input) => {
+      input.addEventListener('change', updateLabels);
+    });
+    toggleControls.addEventListener('click', () => {
+      controls.classList.toggle('collapsed');
+    });
+    updateLabels();
+  </script>
+</body>
+</html>

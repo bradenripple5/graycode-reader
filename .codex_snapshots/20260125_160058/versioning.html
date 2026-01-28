@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML Versioning</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Times New Roman", serif;
+      background: #f7f3ea;
+      color: #1c1c1c;
+    }
+    h1 {
+      margin: 0 0 8px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(200px, 320px) 1fr;
+      gap: 24px;
+    }
+    .panel {
+      background: #fffdf6;
+      border: 1px solid #d8cfc0;
+      padding: 16px;
+      border-radius: 8px;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    li + li {
+      margin-top: 8px;
+    }
+    button.file {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #f1e6d0;
+      border: 1px solid #c9b693;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button.file.active {
+      background: #ffe6b8;
+      border-color: #c99b3f;
+    }
+    .meta {
+      font-size: 14px;
+      line-height: 1.4;
+      background: #fff;
+      border: 1px solid #e0d5c0;
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 120px;
+      white-space: pre-line;
+    }
+    .slider-row {
+      margin: 16px 0 8px;
+    }
+    .slider-row input[type="range"] {
+      width: 100%;
+    }
+    .hint {
+      font-size: 12px;
+      color: #666;
+    }
+    @media (max-width: 800px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>HTML Versioning</h1>
+  <p class="hint">Select a file to see snapshot history (based on .codex_snapshots).</p>
+  <div class="layout">
+    <div class="panel">
+      <h2>Files</h2>
+      <ul id="fileList"></ul>
+    </div>
+    <div class="panel">
+      <h2 id="fileTitle">Choose a file</h2>
+      <div class="slider-row" id="sliderRow" hidden>
+        <input id="historySlider" type="range" min="1" max="1" value="1" step="1">
+      </div>
+      <div class="meta" id="meta">No file selected.</div>
+    </div>
+  </div>
+
+  <script>
+    const fileListEl = document.getElementById('fileList');
+    const fileTitleEl = document.getElementById('fileTitle');
+    const sliderRowEl = document.getElementById('sliderRow');
+    const historySlider = document.getElementById('historySlider');
+    const metaEl = document.getElementById('meta');
+
+    async function fetchHtmlFiles() {
+      const res = await fetch('/');
+      const text = await res.text();
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      const links = Array.from(doc.querySelectorAll('a'))
+        .map((a) => a.getAttribute('href'))
+        .filter((href) => href && href.endsWith('.html'))
+        .map((href) => decodeURIComponent(href.replace(/^\//, '')));
+      return Array.from(new Set(links)).sort();
+    }
+
+    async function fetchSnapshotDirs() {
+      const res = await fetch('/.codex_snapshots/');
+      const text = await res.text();
+      const doc = new DOMParser().parseFromString(text, 'text/html');
+      const dirs = Array.from(doc.querySelectorAll('a'))
+        .map((a) => a.getAttribute('href'))
+        .filter((href) => href && /\/$/.test(href))
+        .map((href) => href.replace(/\/$/, ''))
+        .filter((name) => /^\d{8}_\d{6}$/.test(name));
+      return Array.from(new Set(dirs)).sort().reverse();
+    }
+
+    async function fetchLatestMeta() {
+      try {
+        const res = await fetch('/.codex_snapshots/latest.json');
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }
+
+    async function fileExists(path) {
+      const res = await fetch(path, { method: 'HEAD' });
+      return res.ok;
+    }
+
+    function formatMeta(info) {
+      if (!info) return 'No snapshot info.';
+      return [
+        `File: ${info.file}`,
+        `Snapshot: ${info.timestamp}`,
+        `Changes back: ${info.backIndex}`,
+        info.description ? `Description: ${info.description}` : 'Description: (none)'
+      ].join('\n');
+    }
+
+    async function buildHistory(filePath, latest) {
+      const dirs = await fetchSnapshotDirs();
+      const hits = [];
+      for (const dir of dirs) {
+        const snapshotPath = `/.codex_snapshots/${dir}/${filePath}`;
+        if (await fileExists(snapshotPath)) {
+          hits.push({ timestamp: dir, snapshotPath });
+        }
+      }
+      return hits;
+    }
+
+    function setActiveButton(button) {
+      document.querySelectorAll('button.file').forEach((btn) => {
+        btn.classList.toggle('active', btn === button);
+      });
+    }
+
+    async function selectFile(filePath, button) {
+      setActiveButton(button);
+      fileTitleEl.textContent = filePath;
+      sliderRowEl.hidden = true;
+      metaEl.textContent = 'Loading snapshot history...';
+
+      const latest = await fetchLatestMeta();
+      const history = await buildHistory(filePath, latest);
+      if (!history.length) {
+        metaEl.textContent = 'No snapshots found for this file.';
+        sliderRowEl.hidden = true;
+        return;
+      }
+
+      historySlider.max = String(history.length);
+      historySlider.value = '1';
+      sliderRowEl.hidden = false;
+
+      const updateMeta = () => {
+        const index = parseInt(historySlider.value, 10) - 1;
+        const entry = history[index];
+        const description = latest && latest.timestamp === entry.timestamp ? latest.description : '';
+        metaEl.textContent = formatMeta({
+          file: filePath,
+          timestamp: entry.timestamp,
+          backIndex: index,
+          description
+        });
+      };
+
+      historySlider.oninput = updateMeta;
+      updateMeta();
+    }
+
+    async function init() {
+      const files = await fetchHtmlFiles();
+      fileListEl.innerHTML = '';
+      files.forEach((filePath) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.className = 'file';
+        btn.textContent = filePath;
+        btn.addEventListener('click', () => selectFile(filePath, btn));
+        li.appendChild(btn);
+        fileListEl.appendChild(li);
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

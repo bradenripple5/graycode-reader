@@ -1,0 +1,1 @@
+ok can we make update.js a blank piece of code for now so that now errors are shown?

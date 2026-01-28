@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bouncing Square</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background: #f1f1f1;
+      font-family: "Times New Roman", serif;
+    }
+    canvas {
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="400" height="300"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const square = {
+      size: 40,
+      x: 30,
+      y: 30,
+      vx: 2.4,
+      vy: 2.0
+    };
+    const colors = ['#333', '#1e88e5', '#f4511e'];
+    let colorIndex = 0;
+    let sides = 4;
+
+    function drawPolygon(cx, cy, radius, sidesCount) {
+      if (sidesCount <= 2) return;
+      const step = (Math.PI * 2) / sidesCount;
+      ctx.beginPath();
+      for (let i = 0; i < sidesCount; i++) {
+        const angle = -Math.PI / 2 + i * step;
+        const x = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function step() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = colors[colorIndex];
+      const cx = square.x + square.size / 2;
+      const cy = square.y + square.size / 2;
+      drawPolygon(cx, cy, square.size / 2, sides);
+
+      square.x += square.vx;
+      square.y += square.vy;
+
+      if (square.x <= 0 || square.x + square.size >= canvas.width) {
+        square.vx *= -1;
+        colorIndex = (colorIndex + 1) % colors.length;
+        sides = Math.max(3, Math.min(8, sides + (Math.random() < 0.5 ? -1 : 1)));
+      }
+      if (square.y <= 0 || square.y + square.size >= canvas.height) {
+        square.vy *= -1;
+        colorIndex = (colorIndex + 1) % colors.length;
+        sides = Math.max(3, Math.min(8, sides + (Math.random() < 0.5 ? -1 : 1)));
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    step();
+  </script>
+</body>
+</html>

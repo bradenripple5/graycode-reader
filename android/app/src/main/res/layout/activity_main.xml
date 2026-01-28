@@ -82,6 +82,14 @@
                 android:text="Menu" />
         </LinearLayout>
 
+        <CheckBox
+            android:id="@+id/center_only_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Center only (disable other analysis)"
+            android:textColor="#FFFFFF" />
+
         <TextView
             android:id="@+id/width_label"
             android:layout_width="match_parent"
@@ -94,7 +102,7 @@
             android:id="@+id/width_seek"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:max="50"
+            android:max="300"
             android:progress="5" />
 
         <TextView
@@ -132,7 +140,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Sections: 7"
+            android:text="Read bits (rows): 7"
             android:textColor="#FFFFFF" />
 
         <SeekBar
@@ -143,11 +151,41 @@
             android:progress="7" />
 
         <TextView
+            android:id="@+id/line_count_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Read lines (columns): 9"
+            android:textColor="#FFFFFF" />
+
+        <SeekBar
+            android:id="@+id/line_count_seek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="200"
+            android:progress="9" />
+
+        <TextView
+            android:id="@+id/convergence_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Convergence distance (px): 0"
+            android:textColor="#FFFFFF" />
+
+        <SeekBar
+            android:id="@+id/convergence_seek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="800"
+            android:progress="0" />
+
+        <TextView
             android:id="@+id/red_ratio_label"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Red ratio min: 2.0"
+            android:text="Red ratio min: 1.4"
             android:textColor="#FFFFFF" />
 
         <SeekBar
@@ -155,7 +193,26 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:max="50"
-            android:progress="20" />
+            android:progress="14" />
+
+        <TextView
+            android:id="@+id/green_ratio_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Green ratio min: 1.4"
+            android:textColor="#FFFFFF" />
+
+        <SeekBar
+            android:id="@+id/green_ratio_seek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="50"
+            android:progress="14" />
+
+
+
+
     </LinearLayout>
 
     <FrameLayout
@@ -182,9 +239,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="index: --"
+        android:text="angle: --&#10;bits: --  common: --  order: --"
         android:textAlignment="center"
         android:textColor="#FFFFFF" />
+
+    <Button
+        android:id="@+id/toggle_angle_details"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Angles only" />
 
     <TextView
         android:id="@+id/angle_output"

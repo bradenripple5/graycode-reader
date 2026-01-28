@@ -11,9 +11,16 @@ id angle_output
 id angle_text
 id binary_output
 id captures_text
+id center_only_toggle
 id controls_panel
+id convergence_label
+id convergence_seek
+id green_ratio_label
+id green_ratio_seek
 id height_label
 id height_seek
+id line_count_label
+id line_count_seek
 id lookup_output
 id menu_btn
 id output_scroll
@@ -31,6 +38,7 @@ id stop_btn
 id threshold_label
 id threshold_seek
 id title_text
+id toggle_angle_details
 id toggle_controls
 id toggle_output
 id toggle_preview

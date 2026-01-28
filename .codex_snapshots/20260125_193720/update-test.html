@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Christmas Tree</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background: #0f1c16;
+      color: #f5efe6;
+      font-family: "Times New Roman", serif;
+    }
+    .tree {
+      width: 260px;
+      text-align: center;
+    }
+    .star {
+      font-size: 32px;
+      color: #ffd95a;
+      margin-bottom: -8px;
+    }
+    .tier {
+      margin: 0 auto;
+      height: 0;
+      border-left: 0 solid transparent;
+      border-right: 0 solid transparent;
+    }
+    .tier.t1 {
+      border-left-width: 70px;
+      border-right-width: 70px;
+      border-bottom: 80px solid #1f6b3f;
+    }
+    .tier.t2 {
+      margin-top: -20px;
+      border-left-width: 95px;
+      border-right-width: 95px;
+      border-bottom: 100px solid #1c5d37;
+    }
+    .tier.t3 {
+      margin-top: -24px;
+      border-left-width: 120px;
+      border-right-width: 120px;
+      border-bottom: 120px solid #174b2c;
+    }
+    .trunk {
+      width: 50px;
+      height: 40px;
+      background: #6b4a2b;
+      margin: -6px auto 0;
+      border-radius: 4px;
+    }
+    .garland {
+      font-size: 18px;
+      letter-spacing: 8px;
+      color: #f36f6f;
+      margin: -40px 0 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="tree">
+    <div class="star">★</div>
+    <div class="tier t1"></div>
+    <div class="tier t2"></div>
+    <div class="tier t3"></div>
+    <div class="garland">● ● ● ● ●</div>
+    <div class="trunk"></div>
+  </div>
+  <script src="/update.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bouncing Square</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      background: #f1f1f1;
+      font-family: "Times New Roman", serif;
+    }
+    canvas {
+      background: #fff;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="400" height="300"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const square = {
+      size: 40,
+      x: 30,
+      y: 30,
+      vx: 2.4,
+      vy: 2.0
+    };
+
+    function step() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#333';
+      ctx.fillRect(square.x, square.y, square.size, square.size);
+
+      square.x += square.vx;
+      square.y += square.vy;
+
+      if (square.x <= 0 || square.x + square.size >= canvas.width) {
+        square.vx *= -1;
+      }
+      if (square.y <= 0 || square.y + square.size >= canvas.height) {
+        square.vy *= -1;
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    step();
+  </script>
+</body>
+</html>
