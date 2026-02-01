@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gray Code Reader (Camera + OpenCV.js)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#0b0d10; color:#e8eef7; }
+    header { padding:14px 16px; border-bottom:1px solid #1a2330; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    header h1 { font-size:16px; margin:0; font-weight:600; }
+    main { display:grid; grid-template-columns: 1.3fr 1fr; gap:12px; padding:12px; }
+    .card { background:#0f1319; border:1px solid #1a2330; border-radius:14px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); overflow:hidden; }
+    .card h2 { font-size:13px; margin:0; padding:12px 12px 10px; border-bottom:1px solid #1a2330; color:#cfe3ff; }
+    .card .content { padding:12px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    label { font-size:12px; color:#b9c7db; display:flex; gap:8px; align-items:center; }
+    input[type="range"] { width:220px; }
+    input[type="number"], input[type="text"] {
+      width:110px; padding:6px 8px; border-radius:10px; border:1px solid #253246;
+      background:#0b0f15; color:#e8eef7;
+    }
+    button {
+      padding:8px 10px; border-radius:12px; border:1px solid #2b3b54; background:#121a24; color:#e8eef7;
+      cursor:pointer;
+    }
+    button:hover { background:#182334; }
+    button:disabled { opacity:0.55; cursor:not-allowed; }
+    canvas, video { width:100%; height:auto; display:block; background:#000; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+    .pill { display:inline-flex; padding:4px 8px; border:1px solid #2b3b54; border-radius:999px; background:#0b0f15; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .small { font-size:12px; color:#b9c7db; line-height:1.3; }
+    .warn { color:#ffd38a; }
+    .ok { color:#9cffc6; }
+  </style>
+
+  <!-- Official prebuilt OpenCV.js hosted by OpenCV docs (4.x points to latest 4.x build). -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+</head>
+<body>
+  <header>
+    <h1>Gray Code Reader</h1>
+    <span id="cvStatus" class="pill mono warn">Loading OpenCV.js…</span>
+    <span id="camStatus" class="pill mono warn">Camera: idle</span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Camera View</h2>
+      <div class="content">
+        <video id="video" playsinline autoplay muted style="display:none"></video>
+        <canvas id="view"></canvas>
+        <div class="row" style="margin-top:10px">
+          <button id="startBtn">Start camera</button>
+          <button id="stopBtn" disabled>Stop</button>
+          <button id="autoCenterBtn" disabled>Auto-find center</button>
+          <button id="setCenterBtn" disabled>Manual center: click canvas</button>
+          <span class="pill mono">Center: <span id="centerText">unset</span></span>
+        </div>
+        <div class="small" style="margin-top:8px">
+          Tip: auto-center works best when the encoder ring edges are visible. If it fails, click the center manually.
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Decoder Controls</h2>
+      <div class="content">
+        <div class="grid2">
+          <div>
+            <div class="row">
+              <label>Bits (rings):
+                <input id="bits" type="number" min="2" max="20" value="8"/>
+              </label>
+              <label>Inner r:
+                <input id="rInner" type="number" min="1" max="2000" value="60"/>
+              </label>
+              <label>Outer r:
+                <input id="rOuter" type="number" min="2" max="4000" value="170"/>
+              </label>
+              <button id="makeRadiiBtn" disabled>Make radii</button>
+            </div>
+
+            <div class="row" style="margin-top:10px">
+              <label>Angle θ:
+                <input id="theta" type="range" min="0" max="360" value="0"/>
+                <span class="pill mono"><span id="thetaVal">0</span>°</span>
+              </label>
+              <label>Vote ±Δθ:
+                <input id="voteDelta" type="number" min="0" max="15" value="2"/>
+              </label>
+              <label>Votes:
+                <input id="voteCount" type="number" min="1" max="9" value="3"/>
+              </label>
+            </div>
+
+            <div class="row" style="margin-top:10px">
+              <label>Radial window (px):
+                <input id="wRad" type="number" min="0" max="20" value="2"/>
+              </label>
+              <label>Angular window (deg):
+                <input id="wAng" type="number" min="0" max="10" value="1"/>
+              </label>
+              <label>Samples (rad):
+                <input id="nRad" type="number" min="1" max="15" value="5"/>
+              </label>
+              <label>Samples (ang):
+                <input id="nAng" type="number" min="1" max="11" value="3"/>
+              </label>
+            </div>
+
+            <div class="row" style="margin-top:10px">
+              <button id="calibThreshBtn" disabled>Calibrate thresholds</button>
+              <label title="If enabled, invert bits after thresholding.">
+                Invert
+                <input id="invert" type="checkbox"/>
+              </label>
+              <label title="Try both bit orders (inner→outer vs outer→inner) and pick the more stable one (basic heuristic).">
+                Auto bit-order
+                <input id="autoOrder" type="checkbox" checked />
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <div class="row" style="justify-content:space-between">
+              <span class="pill mono">Gray bits: <span id="grayBits">—</span></span>
+              <span class="pill mono">Binary: <span id="binVal">—</span></span>
+            </div>
+            <div class="row" style="justify-content:space-between; margin-top:10px">
+              <span class="pill mono">Confidence: <span id="confVal">—</span></span>
+              <span class="pill mono">Thresholds: <span id="threshVal">—</span></span>
+            </div>
+
+            <div class="small" style="margin-top:10px">
+              <div><span class="ok">Green</span> overlay = sampling points. Rings = radii. A radial line = θ.</div>
+              <div class="warn" style="margin-top:6px">If you see flicker, increase Votes or widen windows slightly.</div>
+            </div>
+
+            <div style="margin-top:10px">
+              <label class="small" style="display:block; margin-bottom:6px">Radii list (px, inner→outer):</label>
+              <input id="radiiText" class="mono" type="text" style="width:100%" value="" placeholder="e.g. 70, 85, 100, 115, 130, 145, 160, 175"/>
+              <div class="row" style="margin-top:8px">
+                <button id="applyRadiiBtn" disabled>Apply radii</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:0;border-top:1px solid #1a2330;margin:14px 0">
+
+        <div class="small">
+          <b>How it works:</b> find center + radii once, then sample each ring at angle θ using robust windowed median,
+          threshold per ring (calibrated by sampling many angles), then Gray→binary.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+    const deg2rad = (d)=>d*Math.PI/180;
+
+    function median(arr){
+      const a = arr.slice().sort((x,y)=>x-y);
+      const m = Math.floor(a.length/2);
+      return a.length%2 ? a[m] : 0.5*(a[m-1]+a[m]);
+    }
+
+    function grayBitsToBinary(grayBits){
+      let b = [];
+      let prev = 0;
+      for (let i=0;i<grayBits.length;i++){
+        const bi = (i===0) ? grayBits[i] : (prev ^ grayBits[i]);
+        b.push(bi);
+        prev = bi;
+      }
+      return b;
+    }
+
+    function bitsToInt(bits){
+      let v=0;
+      for (let i=0;i<bits.length;i++){
+        v = (v<<1) | (bits[i]&1);
+      }
+      return v>>>0;
+    }
+
+    function drawOverlay(ctx, state){
+      const {cx,cy, radii, thetaDeg, samplePts} = state;
+      ctx.save();
+      ctx.lineWidth = 2;
+
+      if (Number.isFinite(cx) && Number.isFinite(cy)){
+        ctx.strokeStyle = "rgba(255,255,255,0.7)";
+        ctx.beginPath();
+        ctx.moveTo(cx-10,cy); ctx.lineTo(cx+10,cy);
+        ctx.moveTo(cx,cy-10); ctx.lineTo(cx,cy+10);
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(120,180,255,0.35)";
+        for (const r of radii){
+          ctx.beginPath();
+          ctx.arc(cx,cy,r,0,Math.PI*2);
+          ctx.stroke();
+        }
+
+        const t = deg2rad(thetaDeg);
+        const maxR = radii.length? Math.max(...radii) : 200;
+        ctx.strokeStyle = "rgba(255,210,120,0.7)";
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.lineTo(cx + Math.cos(t)*maxR, cy + Math.sin(t)*maxR);
+        ctx.stroke();
+      }
+
+      if (samplePts && samplePts.length){
+        ctx.fillStyle = "rgba(80,255,170,0.85)";
+        for (const p of samplePts){
+          ctx.beginPath();
+          ctx.arc(p.x,p.y,2.2,0,Math.PI*2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+
+    const video = el("video");
+    const canvas = el("view");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    let stream = null;
+    let cvReady = false;
+
+    const state = {
+      cx: NaN,
+      cy: NaN,
+      radii: [],
+      thresholds: [],
+      invert: false,
+      lastGood: null,
+      autoOrder: true,
+      manualCenterMode: false
+    };
+
+    function setStatus(){
+      el("centerText").textContent = (Number.isFinite(state.cx) && Number.isFinite(state.cy))
+        ? `${state.cx.toFixed(1)}, ${state.cy.toFixed(1)}`
+        : "unset";
+      el("threshVal").textContent = state.thresholds.length ? state.thresholds.map(t=>t.toFixed(0)).join(",") : "—";
+    }
+
+    (function waitForCv(){
+      if (typeof cv !== "undefined" && cv && cv.Mat){
+        cvReady = true;
+        el("cvStatus").textContent = "OpenCV.js ready";
+        el("cvStatus").classList.remove("warn");
+        el("cvStatus").classList.add("ok");
+        el("startBtn").disabled = false;
+        return;
+      }
+      setTimeout(waitForCv, 50);
+    })();
+
+    async function startCamera(){
+      if (!cvReady) return;
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
+        video.srcObject = stream;
+        await video.play();
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        el("camStatus").textContent = "Camera: running";
+        el("camStatus").classList.remove("warn");
+        el("camStatus").classList.add("ok");
+
+        el("stopBtn").disabled = false;
+        el("autoCenterBtn").disabled = false;
+        el("setCenterBtn").disabled = false;
+        el("makeRadiiBtn").disabled = false;
+        el("applyRadiiBtn").disabled = false;
+        el("calibThreshBtn").disabled = false;
+
+        requestAnimationFrame(tick);
+      }catch(e){
+        console.error(e);
+        el("camStatus").textContent = "Camera: failed";
+      }
+    }
+
+    function stopCamera(){
+      if (stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+      }
+      el("camStatus").textContent = "Camera: idle";
+      el("camStatus").classList.remove("ok");
+      el("camStatus").classList.add("warn");
+      el("stopBtn").disabled = true;
+    }
+
+    function autoFindCenter(){
+      if (!stream) return;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const src = cv.imread(canvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(9,9), 2, 2, cv.BORDER_DEFAULT);
+
+      const circles = new cv.Mat();
+      const minR = Math.floor(Math.min(canvas.width, canvas.height) * 0.08);
+      const maxR = Math.floor(Math.min(canvas.width, canvas.height) * 0.45);
+      cv.HoughCircles(gray, circles, cv.HOUGH_GRADIENT, 1.2, gray.rows/8, 120, 30, minR, maxR);
+
+      if (circles.cols > 0){
+        const x = circles.data32F[0];
+        const y = circles.data32F[1];
+        state.cx = x;
+        state.cy = y;
+        state.manualCenterMode = false;
+        setStatus();
+      }else{
+        alert("Auto-center failed. Try manual center: click the canvas near the encoder center.");
+      }
+
+      src.delete(); gray.delete(); circles.delete();
+    }
+
+    function enableManualCenter(){
+      state.manualCenterMode = true;
+      alert("Manual center: click on the canvas where the encoder center is.");
+    }
+
+    canvas.addEventListener("click", (ev)=>{
+      if (!state.manualCenterMode) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
+      state.cx = x; state.cy = y;
+      state.manualCenterMode = false;
+      setStatus();
+    });
+
+    function makeRadii(){
+      const bits = clamp(parseInt(el("bits").value||"8",10),2,20);
+      const rIn = Math.max(1, parseFloat(el("rInner").value||"60"));
+      const rOut = Math.max(rIn+1, parseFloat(el("rOuter").value||"170"));
+
+      const step = (rOut - rIn) / (bits - 1);
+      state.radii = Array.from({length:bits}, (_,i)=> rIn + i*step);
+      el("radiiText").value = state.radii.map(r=>r.toFixed(1)).join(", ");
+      state.thresholds = [];
+      setStatus();
+    }
+
+    function applyRadii(){
+      const txt = el("radiiText").value.trim();
+      if (!txt) return;
+      const parts = txt.split(",").map(s=>parseFloat(s.trim())).filter(x=>Number.isFinite(x) && x>0);
+      if (parts.length < 2){
+        alert("Need at least 2 radii.");
+        return;
+      }
+      state.radii = parts;
+      state.thresholds = [];
+      setStatus();
+    }
+
+    function calibrateThresholds(){
+      if (!stream) return;
+      if (!Number.isFinite(state.cx) || !Number.isFinite(state.cy) || state.radii.length < 2){
+        alert("Set center and radii first.");
+        return;
+      }
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const src = cv.imread(canvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+      const angles = 96;
+      const thresholds = [];
+
+      for (const r of state.radii){
+        let vals = [];
+        for (let i=0;i<angles;i++){
+          const t = 2*Math.PI*(i/angles);
+          const x = Math.round(state.cx + Math.cos(t)*r);
+          const y = Math.round(state.cy + Math.sin(t)*r);
+          if (x>=0 && x<gray.cols && y>=0 && y<gray.rows){
+            vals.push(gray.ucharPtr(y,x)[0]);
+          }
+        }
+        if (vals.length < 20){
+          thresholds.push(128);
+          continue;
+        }
+
+        const hist = new Array(256).fill(0);
+        for (const v of vals) hist[v]++;
+
+        const total = vals.length;
+        let sum = 0;
+        for (let i=0;i<256;i++) sum += i*hist[i];
+
+        let sumB = 0, wB = 0, wF = 0;
+        let varMax = -1, thr = 128;
+
+        for (let t=0;t<256;t++){
+          wB += hist[t];
+          if (wB === 0) continue;
+          wF = total - wB;
+          if (wF === 0) break;
+
+          sumB += t*hist[t];
+          const mB = sumB / wB;
+          const mF = (sum - sumB) / wF;
+          const between = wB*wF*(mB - mF)*(mB - mF);
+          if (between > varMax){
+            varMax = between;
+            thr = t;
+          }
+        }
+        thresholds.push(thr);
+      }
+
+      state.thresholds = thresholds;
+      src.delete(); gray.delete();
+      setStatus();
+    }
+
+    function sampleRingBit(grayMat, r, thetaDeg){
+      const cx = state.cx, cy = state.cy;
+      const wRad = parseFloat(el("wRad").value||"2");
+      const wAng = parseFloat(el("wAng").value||"1");
+      const nRad = clamp(parseInt(el("nRad").value||"5",10),1,15);
+      const nAng = clamp(parseInt(el("nAng").value||"3",10),1,11);
+
+      const t0 = deg2rad(thetaDeg);
+      const vals = [];
+      const pts = [];
+
+      for (let ia=0; ia<nAng; ia++){
+        const fracA = (nAng===1) ? 0 : (ia/(nAng-1) - 0.5);
+        const t = t0 + deg2rad(fracA*wAng*2);
+
+        for (let ir=0; ir<nRad; ir++){
+          const fracR = (nRad===1) ? 0 : (ir/(nRad-1) - 0.5);
+          const rr = r + fracR*wRad*2;
+
+          const x = Math.round(cx + Math.cos(t)*rr);
+          const y = Math.round(cy + Math.sin(t)*rr);
+
+          if (x>=0 && x<grayMat.cols && y>=0 && y<grayMat.rows){
+            vals.push(grayMat.ucharPtr(y,x)[0]);
+            pts.push({x,y});
+          }
+        }
+      }
+
+      const m = vals.length ? median(vals) : 0;
+      return {value:m, pts};
+    }
+
+    function decodeAtTheta(grayMat, thetaDeg, order){
+      const invert = el("invert").checked;
+      const radii = (order==="out2in") ? state.radii.slice().reverse() : state.radii.slice();
+      const bits = [];
+      let allPts = [];
+
+      for (let i=0;i<radii.length;i++){
+        const r = radii[i];
+        const thr = state.thresholds[i] ?? 128;
+        const s = sampleRingBit(grayMat, r, thetaDeg);
+        let bit = (s.value >= thr) ? 1 : 0;
+        if (invert) bit ^= 1;
+        bits.push(bit);
+        allPts = allPts.concat(s.pts);
+      }
+
+      const binBits = grayBitsToBinary(bits);
+      const val = bitsToInt(binBits);
+
+      return {grayBits:bits, binBits, val, pts: allPts};
+    }
+
+    function majorityVote(values){
+      const n = values.length;
+      const len = values[0].length;
+      const out = new Array(len).fill(0);
+      for (let i=0;i<len;i++){
+        let sum=0;
+        for (let k=0;k<n;k++) sum += values[k][i];
+        out[i] = (sum >= (n/2)) ? 1 : 0;
+      }
+      return out;
+    }
+
+    function confidenceFromVotes(votedBits, voteSets){
+      let total=0, match=0;
+      for (const bits of voteSets){
+        for (let i=0;i<bits.length;i++){
+          total++;
+          if (bits[i] === votedBits[i]) match++;
+        }
+      }
+      return total ? (match/total) : 0;
+    }
+
+    function tick(){
+      if (!stream) return;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      let overlayPts = [];
+      let grayBitsStr = "—";
+      let binValStr = "—";
+
+      if (Number.isFinite(state.cx) && Number.isFinite(state.cy) && state.radii.length >= 2 && state.thresholds.length === state.radii.length){
+        const thetaDeg = parseFloat(el("theta").value||"0");
+        const voteDelta = clamp(parseFloat(el("voteDelta").value||"2"),0,15);
+        const voteCount = clamp(parseInt(el("voteCount").value||"3",10),1,9);
+
+        const src = cv.imread(canvas);
+        const gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+        const angles = [];
+        if (voteCount === 1){
+          angles.push(thetaDeg);
+        } else {
+          const half = Math.floor(voteCount/2);
+          for (let i=-half; i<=half; i++){
+            angles.push(thetaDeg + i*voteDelta);
+          }
+        }
+
+        const orders = (el("autoOrder").checked) ? ["in2out","out2in"] : ["in2out"];
+
+        let best = null;
+
+        for (const ord of orders){
+          const grayVoteSets = [];
+          const ptsSets = [];
+
+          for (const a of angles){
+            const d = decodeAtTheta(gray, a, ord);
+            grayVoteSets.push(d.grayBits);
+            ptsSets.push(d.pts);
+          }
+
+          const votedGray = majorityVote(grayVoteSets);
+          const votedBin = grayBitsToBinary(votedGray);
+          const votedVal = bitsToInt(votedBin);
+          const conf = confidenceFromVotes(votedGray, grayVoteSets);
+
+          const candidate = {ord, votedGray, votedVal, conf, overlayPts: ptsSets[0] || []};
+          if (!best || candidate.conf > best.conf) best = candidate;
+        }
+
+        if (best){
+          overlayPts = best.overlayPts;
+          grayBitsStr = best.votedGray.join("");
+          binValStr = String(best.votedVal);
+          el("confVal").textContent = (best.conf*100).toFixed(1) + "%";
+        }
+
+        src.delete(); gray.delete();
+      }
+
+      el("grayBits").textContent = grayBitsStr;
+      el("binVal").textContent = binValStr;
+
+      drawOverlay(ctx, {
+        cx: state.cx, cy: state.cy,
+        radii: state.radii,
+        thetaDeg: parseFloat(el("theta").value||"0"),
+        samplePts: overlayPts
+      });
+
+      requestAnimationFrame(tick);
+    }
+
+    el("startBtn").addEventListener("click", startCamera);
+    el("stopBtn").addEventListener("click", stopCamera);
+    el("autoCenterBtn").addEventListener("click", autoFindCenter);
+    el("setCenterBtn").addEventListener("click", enableManualCenter);
+
+    el("makeRadiiBtn").addEventListener("click", makeRadii);
+    el("applyRadiiBtn").addEventListener("click", applyRadii);
+    el("calibThreshBtn").addEventListener("click", calibrateThresholds);
+
+    el("theta").addEventListener("input", ()=> el("thetaVal").textContent = el("theta").value);
+
+    el("thetaVal").textContent = el("theta").value;
+    setStatus();
+  </script>
+</body>
+</html>

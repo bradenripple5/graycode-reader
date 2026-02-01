@@ -81,6 +81,23 @@
     .binary-columns .col {
       white-space: nowrap;
     }
+    .ray-colors {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .ray-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .ray-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+    }
     .canvas-wrap {
       position: relative;
     }
@@ -101,6 +118,19 @@
       color: #145a32;
       font-weight: 600;
     }
+    .metric-box {
+      display: inline-block;
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: #7b1f1f;
+      background: #fff0f0;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .metric-box + .metric-box {
+      margin-left: 8px;
+    }
   </style>
 </head>
 <body>
@@ -120,6 +150,79 @@
       <label>
         <input type="radio" name="detectMode" value="green">
         Green squares
+      </label>
+      <label>
+        <input id="enableBluePixels" type="checkbox">
+        Show blue pixels
+      </label>
+      <label>
+        <input id="enableLineTracking" type="checkbox" checked>
+        Track lines
+      </label>
+      <!--
+      <label>
+        <input id="enableIntersect" type="checkbox">
+        Intersect detection
+      </label>
+      -->
+      <label>
+        <input id="enableBlueArc" type="checkbox">
+        Draw green arc
+      </label>
+      <!--
+      <label>
+        <input id="enableRgbPattern" type="checkbox">
+        RGB pattern filter
+      </label>
+      -->
+      <label>
+        Min neighbor distance: <span id="groupGapVal">20</span>
+        <input id="groupGap" type="range" min="1" max="200" value="20" step="1">
+      </label>
+      <label>
+        <input id="enableRadial" type="checkbox">
+        Radial lines detect
+      </label>
+      <label>
+        Blue delta min: <span id="blueDeltaVal">25</span>
+        <input id="blueDelta" type="range" min="0" max="120" value="25" step="1">
+      </label>
+      <label>
+        Blue min cluster: <span id="blueMinSizeVal">1</span>
+        <input id="blueMinSize" type="range" min="1" max="9" value="1" step="1">
+      </label>
+      <label>
+        Red delta min: <span id="redDeltaVal">40</span>
+        <input id="redDelta" type="range" min="0" max="120" value="40" step="1">
+      </label>
+      <label>
+        Min red pixels per group: <span id="minRedGroupVal">30</span>
+        <input id="minRedGroup" type="range" min="3" max="500" value="30" step="1">
+      </label>
+      <label>
+        Max red group dist: <span id="maxRedGroupDistVal">25</span>
+        <input id="maxRedGroupDist" type="range" min="3" max="80" value="25" step="1">
+      </label>
+      <label>
+        Max boundary steps: <span id="maxBoundaryStepsVal">2000</span>
+        <input id="maxBoundarySteps" type="range" min="100" max="10000" value="2000" step="100">
+      </label>
+      <label>
+        White pixel intensity: <span id="radialWhiteVal">130</span>
+        <input id="radialWhite" type="range" min="50" max="220" value="130" step="1">
+      </label>
+      <label>
+        Max radial lines: <span id="radialMaxLinesVal">10</span>
+        <input id="radialMaxLines" type="range" min="1" max="20" value="10" step="1">
+      </label>
+      <label>
+        Bands (n): <span id="bandCountVal">6</span>
+        <input id="bandCount" type="range" min="1" max="12" value="6" step="1">
+        → 2<sup id="bandExpVal">6</sup> = <span id="bandAnglesVal">64</span>
+      </label>
+      <label>
+        Center filter px: <span id="centerFilterPxVal">50</span>
+        <input id="centerFilterPx" type="range" min="10" max="200" value="50" step="5">
       </label>
       <label>
         Min green: <span id="minGreenVal">120</span>
@@ -151,7 +254,20 @@
       </label>
     </div>
 
+    <!-- <div class="info" id="rgbStatus">RGB points: 0</div> -->
+    <!-- <div class="ray-colors" id="rayColors"></div> -->
+    <div class="binary-columns" id="allLineBits"></div>
     <div class="binary-columns" id="binaryColumns"></div>
+    <div class="binary-columns" id="rawLineBits"></div>
+    <div class="metric-box">
+      Red pixels: <span id="redPixelCount">0</span>
+      | Min: <span id="redPixelMin">0</span>
+      | Max: <span id="redPixelMax">0</span>
+      | Avg: <span id="redPixelAvg">0</span>
+    </div>
+    <div class="metric-box">
+      Avg frame time: <span id="avgFrameMs">0</span> ms
+    </div>
     <div class="canvas-wrap">
       <canvas id="preview"></canvas>
     </div>
@@ -167,6 +283,8 @@
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const statusEl = document.getElementById('status');
+    // const rgbStatusEl = document.getElementById('rgbStatus');
+    // const rayColorsEl = document.getElementById('rayColors');
     const minGreen = document.getElementById('minGreen');
     const delta = document.getElementById('delta');
     const minArea = document.getElementById('minArea');
@@ -178,20 +296,63 @@
     const squareCount = document.getElementById('squareCount');
     const maxNeighbor = document.getElementById('maxNeighbor');
     const maxNeighborVal = document.getElementById('maxNeighborVal');
+    const groupGap = document.getElementById('groupGap');
+    const groupGapVal = document.getElementById('groupGapVal');
+    const enableRadial = document.getElementById('enableRadial');
+    const blueDelta = document.getElementById('blueDelta');
+    const blueDeltaVal = document.getElementById('blueDeltaVal');
+    const blueMinSize = document.getElementById('blueMinSize');
+    const blueMinSizeVal = document.getElementById('blueMinSizeVal');
+    const redDelta = document.getElementById('redDelta');
+    const redDeltaVal = document.getElementById('redDeltaVal');
+    const minRedGroup = document.getElementById('minRedGroup');
+    const minRedGroupVal = document.getElementById('minRedGroupVal');
+    const maxRedGroupDist = document.getElementById('maxRedGroupDist');
+    const maxRedGroupDistVal = document.getElementById('maxRedGroupDistVal');
+    const maxBoundarySteps = document.getElementById('maxBoundarySteps');
+    const maxBoundaryStepsVal = document.getElementById('maxBoundaryStepsVal');
+    const radialWhite = document.getElementById('radialWhite');
+    const radialWhiteVal = document.getElementById('radialWhiteVal');
+    const radialMaxLines = document.getElementById('radialMaxLines');
+    const radialMaxLinesVal = document.getElementById('radialMaxLinesVal');
+    const bandCount = document.getElementById('bandCount');
+    const bandCountVal = document.getElementById('bandCountVal');
+    const bandExpVal = document.getElementById('bandExpVal');
+    const bandAnglesVal = document.getElementById('bandAnglesVal');
+    const centerFilterPx = document.getElementById('centerFilterPx');
+    const centerFilterPxVal = document.getElementById('centerFilterPxVal');
     const sections = document.getElementById('sections');
     const sectionsVal = document.getElementById('sectionsVal');
     const centerWindow = document.getElementById('centerWindow');
     const centerWindowVal = document.getElementById('centerWindowVal');
     const detectModeInputs = document.querySelectorAll('input[name="detectMode"]');
+    const enableBlueArc = document.getElementById('enableBlueArc');
+    const allLineBits = document.getElementById('allLineBits');
     const binaryColumns = document.getElementById('binaryColumns');
+    const rawLineBits = document.getElementById('rawLineBits');
     const controls = document.querySelector('.controls');
     const toggleControls = document.getElementById('toggleControls');
+    const redPixelCount = document.getElementById('redPixelCount');
+    const redPixelMin = document.getElementById('redPixelMin');
+    const redPixelMax = document.getElementById('redPixelMax');
+    const redPixelAvg = document.getElementById('redPixelAvg');
+    const avgFrameMs = document.getElementById('avgFrameMs');
+    const enableBluePixels = document.getElementById('enableBluePixels');
+    const enableLineTracking = document.getElementById('enableLineTracking');
 
     let stream = null;
     let animationId = null;
     let workCanvas = document.createElement('canvas');
     let workCtx = workCanvas.getContext('2d');
     let lastNCenters = [];
+    let lastLineCenters = [];
+    let rgb_points = [];
+    let lastRgbPoint = null;
+    let redStats = { min: Infinity, max: 0, total: 0, frames: 0 };
+    let frameStats = { totalMs: 0, frames: 0 };
+    let lastRayLines = [];
+    let lastCenterFull = null;
+    let lastArcRadius = null;
 
     function updateLabels() {
       minGreenVal.textContent = minGreen.value;
@@ -199,6 +360,19 @@
       minAreaVal.textContent = minArea.value;
       downscaleVal.textContent = downscale.value;
       maxNeighborVal.textContent = maxNeighbor.value;
+      groupGapVal.textContent = groupGap.value;
+      blueDeltaVal.textContent = blueDelta.value;
+      blueMinSizeVal.textContent = blueMinSize.value;
+      redDeltaVal.textContent = redDelta.value;
+      minRedGroupVal.textContent = minRedGroup.value;
+      maxRedGroupDistVal.textContent = maxRedGroupDist.value;
+      maxBoundaryStepsVal.textContent = maxBoundarySteps.value;
+      radialWhiteVal.textContent = radialWhite.value;
+      radialMaxLinesVal.textContent = radialMaxLines.value;
+      bandCountVal.textContent = bandCount.value;
+      bandExpVal.textContent = bandCount.value;
+      bandAnglesVal.textContent = (1 << parseInt(bandCount.value, 10)).toLocaleString();
+      centerFilterPxVal.textContent = centerFilterPx.value;
       sectionsVal.textContent = sections.value;
       centerWindowVal.textContent = centerWindow.value;
     }
@@ -532,6 +706,13 @@
         startBtn.disabled = false;
         stopBtn.disabled = true;
         statusEl.textContent = 'Idle.';
+        redStats = { min: Infinity, max: 0, total: 0, frames: 0 };
+        redPixelCount.textContent = '0';
+        redPixelMin.textContent = '0';
+        redPixelMax.textContent = '0';
+        redPixelAvg.textContent = '0';
+        frameStats = { totalMs: 0, frames: 0 };
+        avgFrameMs.textContent = '0';
       }
     }
 
@@ -608,13 +789,1030 @@
       return b >= 200 && r <= 60 && g <= 60 && b - Math.max(r, g) >= 120;
     }
 
-    function detectBlueIntersections(imageData, width, height, angleStepDeg) {
+    function isGreenPixel(r, g, b) {
+      const gMin = parseInt(minGreen.value, 10);
+      const dMin = parseInt(delta.value, 10);
+      return g >= gMin && g - r >= dMin && g - b >= dMin;
+    }
+
+    function isWhitePixel(r, g, b) {
+      return (r + g + b) / 3 >= 180;
+    }
+
+    function classifyRgb(r, g, b) {
+      if (r >= 100 && r - g >= 40 && r - b >= 40) return 'r';
+      if (g >= 100 && g - r >= 40 && g - b >= 40) return 'g';
+      if (b >= 100 && b - r >= 40 && b - g >= 40) return 'b';
+      return null;
+    }
+
+    function rgbToHsv(r, g, b) {
+      const rn = r / 255;
+      const gn = g / 255;
+      const bn = b / 255;
+      const max = Math.max(rn, gn, bn);
+      const min = Math.min(rn, gn, bn);
+      const delta = max - min;
+      let h = 0;
+      if (delta !== 0) {
+        if (max === rn) {
+          h = ((gn - bn) / delta) % 6;
+        } else if (max === gn) {
+          h = (bn - rn) / delta + 2;
+        } else {
+          h = (rn - gn) / delta + 4;
+        }
+        h *= 60;
+        if (h < 0) h += 360;
+      }
+      const s = max === 0 ? 0 : delta / max;
+      const v = max;
+      return { h, s, v };
+    }
+
+    function isRedHsv(r, g, b) {
+      const { h, s, v } = rgbToHsv(r, g, b);
+      const isRedHue = h <= 20 || h >= 340;
+      const deltaAvg = r - (g + b) / 2;
+      const minDelta = parseInt(redDelta.value, 10);
+      return isRedHue && s >= 0.35 && v >= 0.25 && deltaAvg >= minDelta;
+    }
+
+    function findRedPoints(imageData, width, height) {
+      const data = imageData.data;
+      const hits = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          if (isRedHsv(data[idx], data[idx + 1], data[idx + 2])) {
+            hits.push({ x, y });
+          }
+        }
+      }
+      return hits;
+    }
+
+    function sampleSubdividingLineBits(imageData, cx, cy, angle, bandCount, whiteThresh) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      const perpX = -sinA;
+      const perpY = cosA;
+      const maxR = Math.min(cx, cy, width - cx, height - cy);
+
+      function samplePerpBit(x0, y0) {
+        const offsets = [0, 1, -1];
+        let sum = 0;
+        let count = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const x = Math.round(x0 + perpX * offsets[i]);
+          const y = Math.round(y0 + perpY * offsets[i]);
+          if (x < 0 || y < 0 || x >= width || y >= height) continue;
+          const idx = (y * width + x) * 4;
+          const pr = data[idx];
+          const pg = data[idx + 1];
+          const pb = data[idx + 2];
+          sum += (pr + pg + pb) / 3;
+          count += 1;
+        }
+        if (!count) return null;
+        return sum / count >= whiteThresh ? 1 : 0;
+      }
+
+      const rawBits = [];
+      for (let r = 0; r <= maxR; r += 1) {
+        const x = Math.round(cx + r * cosA);
+        const y = Math.round(cy + r * sinA);
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        const bit = samplePerpBit(x, y);
+        if (bit !== null) rawBits.push(bit);
+      }
+
+      if (!rawBits.length) return null;
+
+      const outputBands = 16;
+      const bits = [];
+      for (let i = 0; i < outputBands; i++) {
+        const start = Math.floor((i * rawBits.length) / outputBands);
+        const end = Math.floor(((i + 1) * rawBits.length) / outputBands);
+        if (end <= start) {
+          bits.push(0);
+          continue;
+        }
+        let ones = 0;
+        for (let j = start; j < end; j++) ones += rawBits[j];
+        const avg = ones / (end - start);
+        bits.push(avg > 0.5 ? 1 : 0);
+      }
+      return bits;
+    }
+
+    function sampleSubdividingLineRawBits(imageData, cx, cy, angle, whiteThresh) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+      const perpX = -sinA;
+      const perpY = cosA;
+      const maxR = Math.min(cx, cy, width - cx, height - cy);
+
+      function samplePerpBit(x0, y0) {
+        const offsets = [0, 1, -1];
+        let sum = 0;
+        let count = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const x = Math.round(x0 + perpX * offsets[i]);
+          const y = Math.round(y0 + perpY * offsets[i]);
+          if (x < 0 || y < 0 || x >= width || y >= height) continue;
+          const idx = (y * width + x) * 4;
+          const pr = data[idx];
+          const pg = data[idx + 1];
+          const pb = data[idx + 2];
+          sum += (pr + pg + pb) / 3;
+          count += 1;
+        }
+        if (!count) return null;
+        return sum / count >= whiteThresh ? 1 : 0;
+      }
+
+      const bits = [];
+      for (let r = 0; r <= maxR; r += 1) {
+        const x = Math.round(cx + r * cosA);
+        const y = Math.round(cy + r * sinA);
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        const bit = samplePerpBit(x, y);
+        if (bit !== null) bits.push(bit);
+      }
+      return bits.length ? bits : null;
+    }
+
+    function reduceBitsByBands(bits, bandCount) {
+      if (!bits || !bits.length || bandCount <= 0) return null;
+      const reduced = [];
+      for (let i = 0; i < bandCount; i++) {
+        const start = Math.floor((i * bits.length) / bandCount);
+        const end = Math.floor(((i + 1) * bits.length) / bandCount);
+        if (end <= start) {
+          reduced.push(0);
+          continue;
+        }
+        let ones = 0;
+        for (let j = start; j < end; j++) ones += bits[j];
+        const avg = ones / (end - start);
+        reduced.push(avg > 0.5 ? 1 : 0);
+      }
+      return reduced;
+    }
+
+    function findBluePoints(imageData, width, height) {
+      const data = imageData.data;
+      const hits = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          if (isBluePixel(data[idx], data[idx + 1], data[idx + 2])) {
+            hits.push({ x, y });
+          }
+        }
+      }
+      return hits;
+    }
+
+    function fitLineFrom2(p1, p2) {
+      const a = p2.y - p1.y;
+      const b = p1.x - p2.x;
+      const norm = Math.hypot(a, b) || 1;
+      const an = a / norm;
+      const bn = b / norm;
+      const c = -(an * p1.x + bn * p1.y);
+      return { a: an, b: bn, c };
+    }
+
+    function pointLineDist(line, p) {
+      return Math.abs(line.a * p.x + line.b * p.y + line.c);
+    }
+
+    function lineProjSpan(line, pts) {
+      const dx = line.b;
+      const dy = -line.a;
+      let minP = Infinity;
+      let maxP = -Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const t = p.x * dx + p.y * dy;
+        if (t < minP) minP = t;
+        if (t > maxP) maxP = t;
+      }
+      return maxP - minP;
+    }
+
+    function intersectLines(l1, l2) {
+      const det = l1.a * l2.b - l2.a * l1.b;
+      if (Math.abs(det) < 1e-9) return null;
+      const x = (l1.b * l2.c - l2.b * l1.c) / det;
+      const y = (l2.a * l1.c - l1.a * l2.c) / det;
+      return { x, y };
+    }
+
+    function medianXY(points) {
+      if (!points.length) return null;
+      const xs = points.map(p => p.x).sort((a, b) => a - b);
+      const ys = points.map(p => p.y).sort((a, b) => a - b);
+      const m = (points.length / 2) | 0;
+      return { x: xs[m], y: ys[m] };
+    }
+
+    function extractRansacRays(points, {
+      maxLines = 12,
+      iters = 700,
+      distThresh = 2.5,
+      minInliers = 50,
+      minSpan = 80
+    } = {}) {
+      let pts = points;
+      if (pts.length > 3000) {
+        const step = Math.ceil(pts.length / 3000);
+        pts = pts.filter((_, i) => i % step === 0);
+      }
+
+      const remaining = pts.slice();
+      const rays = [];
+
+      function randIdx(n) { return (Math.random() * n) | 0; }
+
+      for (let k = 0; k < maxLines; k++) {
+        if (remaining.length < minInliers) break;
+
+        let bestLine = null;
+        let bestInlierIdx = null;
+        let bestScore = -1;
+
+        for (let t = 0; t < iters; t++) {
+          const i = randIdx(remaining.length);
+          const j = randIdx(remaining.length);
+          if (i === j) continue;
+
+          const line = fitLineFrom2(remaining[i], remaining[j]);
+
+          const inlierIdx = [];
+          for (let p = 0; p < remaining.length; p++) {
+            if (pointLineDist(line, remaining[p]) <= distThresh) {
+              inlierIdx.push(p);
+            }
+          }
+          if (inlierIdx.length < minInliers) continue;
+
+          const inliers = inlierIdx.map(idx => remaining[idx]);
+          const span = lineProjSpan(line, inliers);
+          if (span < minSpan) continue;
+
+          const score = inlierIdx.length + span * 0.02;
+          if (score > bestScore) {
+            bestScore = score;
+            bestLine = line;
+            bestInlierIdx = inlierIdx;
+          }
+        }
+
+        if (!bestLine) break;
+
+        const mask = new Uint8Array(remaining.length);
+        for (let i = 0; i < bestInlierIdx.length; i++) {
+          mask[bestInlierIdx[i]] = 1;
+        }
+
+        const inliers = [];
+        const newRemaining = [];
+        for (let i = 0; i < remaining.length; i++) {
+          if (mask[i]) inliers.push(remaining[i]);
+          else newRemaining.push(remaining[i]);
+        }
+
+        rays.push({ line: bestLine, inliers });
+        remaining.length = 0;
+        remaining.push(...newRemaining);
+      }
+
+      return rays;
+    }
+
+    function estimateCenterFromRays(points, opts) {
+      const rays = extractRansacRays(points, opts);
+      if (rays.length < 2) return null;
+
+      const inters = [];
+      for (let i = 0; i < rays.length; i++) {
+        for (let j = i + 1; j < rays.length; j++) {
+          const p = intersectLines(rays[i].line, rays[j].line);
+          if (p) inters.push(p);
+        }
+      }
+      return { center: medianXY(inters), rays };
+    }
+
+    function extractArcFromCenterRansac(points, center, {
+      iters = 400,
+      inlierTol = 5,
+      minInliers = 80
+    } = {}) {
+      if (!points.length) return null;
+      let best = null;
+      let bestInliers = null;
+      for (let t = 0; t < iters; t++) {
+        const idx = (Math.random() * points.length) | 0;
+        const p = points[idx];
+        const r0 = Math.hypot(p.x - center.x, p.y - center.y);
+        if (!r0) continue;
+        const inliers = [];
+        for (let i = 0; i < points.length; i++) {
+          const q = points[i];
+          const r = Math.hypot(q.x - center.x, q.y - center.y);
+          if (Math.abs(r - r0) <= inlierTol) inliers.push(q);
+        }
+        if (inliers.length < minInliers) continue;
+        if (!best || inliers.length > bestInliers.length) {
+          const sumR = inliers.reduce(
+            (acc, q) => acc + Math.hypot(q.x - center.x, q.y - center.y),
+            0
+          );
+          best = sumR / inliers.length;
+          bestInliers = inliers;
+        }
+      }
+      if (!bestInliers) return null;
+      return { radius: best, inliers: bestInliers };
+    }
+
+    function lineSegmentInBounds(line, width, height) {
+      const pts = [];
+      const eps = 1e-9;
+      if (Math.abs(line.b) > eps) {
+        const y0 = -(line.a * 0 + line.c) / line.b;
+        if (y0 >= 0 && y0 <= height) pts.push({ x: 0, y: y0 });
+        const y1 = -(line.a * width + line.c) / line.b;
+        if (y1 >= 0 && y1 <= height) pts.push({ x: width, y: y1 });
+      }
+      if (Math.abs(line.a) > eps) {
+        const x0 = -(line.b * 0 + line.c) / line.a;
+        if (x0 >= 0 && x0 <= width) pts.push({ x: x0, y: 0 });
+        const x1 = -(line.b * height + line.c) / line.a;
+        if (x1 >= 0 && x1 <= width) pts.push({ x: x1, y: height });
+      }
+      if (pts.length < 2) return null;
+      let best = [pts[0], pts[1]];
+      let bestDist = -1;
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const dx = pts[j].x - pts[i].x;
+          const dy = pts[j].y - pts[i].y;
+          const d = dx * dx + dy * dy;
+          if (d > bestDist) {
+            bestDist = d;
+            best = [pts[i], pts[j]];
+          }
+        }
+      }
+      return best;
+    }
+
+    function clusterPoints(points, maxDist) {
+      if (!points.length) return [];
+      const clusters = [];
+      const visited = new Array(points.length).fill(false);
+      const maxDistSq = maxDist * maxDist;
+
+      for (let i = 0; i < points.length; i++) {
+        if (visited[i]) continue;
+        const cluster = [];
+        const stack = [i];
+        visited[i] = true;
+        while (stack.length) {
+          const idx = stack.pop();
+          const p = points[idx];
+          cluster.push(p);
+          for (let j = 0; j < points.length; j++) {
+            if (visited[j]) continue;
+            const q = points[j];
+            const dx = q.x - p.x;
+            const dy = q.y - p.y;
+            if (dx * dx + dy * dy <= maxDistSq) {
+              visited[j] = true;
+              stack.push(j);
+            }
+          }
+        }
+        clusters.push(cluster);
+      }
+      return clusters;
+    }
+
+    function farthestPair(points) {
+      let best = null;
+      let bestDist = -1;
+      for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const d = dx * dx + dy * dy;
+          if (d > bestDist) {
+            bestDist = d;
+            best = [points[i], points[j]];
+          }
+        }
+      }
+      return best;
+    }
+
+    function pcaLine(points) {
+      if (!points.length) return null;
+      let meanX = 0;
+      let meanY = 0;
+      for (let i = 0; i < points.length; i++) {
+        meanX += points[i].x;
+        meanY += points[i].y;
+      }
+      meanX /= points.length;
+      meanY /= points.length;
+      let sxx = 0;
+      let sxy = 0;
+      let syy = 0;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - meanX;
+        const dy = points[i].y - meanY;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+      }
+      // Principal eigenvector of covariance matrix.
+      const trace = sxx + syy;
+      const det = sxx * syy - sxy * sxy;
+      const temp = Math.sqrt(Math.max(0, trace * trace - 4 * det));
+      const lambda = (trace + temp) / 2;
+      let vx = sxy;
+      let vy = lambda - sxx;
+      if (Math.abs(vx) + Math.abs(vy) < 1e-6) {
+        vx = 1;
+        vy = 0;
+      }
+      const norm = Math.hypot(vx, vy);
+      vx /= norm;
+      vy /= norm;
+
+      // Project points onto the principal axis to find span.
+      let minProj = Infinity;
+      let maxProj = -Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - meanX;
+        const dy = points[i].y - meanY;
+        const proj = dx * vx + dy * vy;
+        if (proj < minProj) minProj = proj;
+        if (proj > maxProj) maxProj = proj;
+      }
+      return {
+        x1: meanX + minProj * vx,
+        y1: meanY + minProj * vy,
+        x2: meanX + maxProj * vx,
+        y2: meanY + maxProj * vy
+      };
+    }
+
+    // Detect blue pixels that have bright neighbors on both horizontal sides.
+    // function radialLinesDetect(imageData, width, height) {
+    //   const data = imageData.data;
+    //   const hits = [];
+    //   const whiteThresh = parseInt(radialWhite.value, 10);
+    //   const blueDeltaThresh = parseInt(blueDelta.value, 10);
+    //   const blueMinCount = parseInt(blueMinSize.value, 10);
+    //   const maxLines = parseInt(radialMaxLines.value, 10);
+    //   const minLinePoints = 5;
+
+    //   function idxAt(x, y) {
+    //     return (y * width + x) * 4;
+    //   }
+
+    //   function isBluePixelLoose(r, g, b) {
+    //     const max = Math.max(r, g, b);
+    //     const min = Math.min(r, g, b);
+    //     const delta = max - min;
+    //     if (b !== max) return false;
+    //     if (b < 90) return false;
+    //     if (delta < 30) return false;
+    //     if (b - (r + g) / 2 < blueDeltaThresh) return false;
+    //     return true;
+    //   }
+
+    //   function isWhitePixelLoose(r, g, b) {
+    //     return r >= whiteThresh && g >= whiteThresh && b >= whiteThresh;
+    //   }
+
+    //   function inBounds(x, y) {
+    //     return x >= 0 && y >= 0 && x < width && y < height;
+    //   }
+
+    //   function isBlueAt(x, y) {
+    //     const idx = idxAt(x, y);
+    //     return isBluePixelLoose(data[idx], data[idx + 1], data[idx + 2]);
+    //   }
+
+    //   function blueNeighborCount(x, y) {
+    //     if (blueMinCount <= 1) return blueMinCount;
+    //     let count = 0;
+    //     for (let oy = -1; oy <= 1; oy++) {
+    //       for (let ox = -1; ox <= 1; ox++) {
+    //         const nx = x + ox;
+    //         const ny = y + oy;
+    //         if (!inBounds(nx, ny)) continue;
+    //         if (isBlueAt(nx, ny)) count++;
+    //       }
+    //     }
+    //     return count;
+    //   }
+
+    //   function hasWhiteSides(x, y, dx, dy) {
+    //     const px = -Math.sign(dy);
+    //     const py = Math.sign(dx);
+    //     const lx = x + px;
+    //     const ly = y + py;
+    //     const rx = x - px;
+    //     const ry = y - py;
+    //     if (!inBounds(lx, ly) || !inBounds(rx, ry)) return false;
+    //     const lIdx = idxAt(lx, ly);
+    //     const rIdx = idxAt(rx, ry);
+    //     const lWhite = isWhitePixelLoose(data[lIdx], data[lIdx + 1], data[lIdx + 2]);
+    //     const rWhite = isWhitePixelLoose(data[rIdx], data[rIdx + 1], data[rIdx + 2]);
+    //     return lWhite && rWhite;
+    //   }
+
+    //   function traceLine(x, y, dx, dy) {
+    //     const points = [];
+    //     let cx = x;
+    //     let cy = y;
+    //     while (inBounds(cx, cy) && isBlueAt(cx, cy) && hasWhiteSides(cx, cy, dx, dy)) {
+    //       points.push({ x: cx, y: cy });
+    //       cx += dx;
+    //       cy += dy;
+    //     }
+    //     return points;
+    //   }
+
+    //   function gcd(a, b) {
+    //     let x = a;
+    //     let y = b;
+    //     while (y !== 0) {
+    //       const t = x % y;
+    //       x = y;
+    //       y = t;
+    //     }
+    //     return x;
+    //   }
+
+    //   const directions = [];
+    //   for (let dy = -2; dy <= 2; dy++) {
+    //     for (let dx = -2; dx <= 2; dx++) {
+    //       if (dx === 0 && dy === 0) continue;
+    //       if (dy < 0 || (dy === 0 && dx < 0)) continue;
+    //       const g = gcd(Math.abs(dx), Math.abs(dy));
+    //       if (g !== 1) continue;
+    //       directions.push([dx, dy]);
+    //     }
+    //   }
+
+    //   const visited = new Uint8Array(width * height);
+    //   let lineCount = 0;
+
+    //   outer:
+    //   for (let y = 1; y < height - 1; y++) {
+    //     for (let x = 1; x < width - 1; x++) {
+    //       if (lineCount >= maxLines) break outer;
+    //       const vIdx = y * width + x;
+    //       if (visited[vIdx]) continue;
+    //       if (!isBlueAt(x, y)) continue;
+    //       if (blueNeighborCount(x, y) < blueMinCount) continue;
+
+    //       let foundLine = false;
+    //       for (let d = 0; d < directions.length; d++) {
+    //         const dx = directions[d][0];
+    //         const dy = directions[d][1];
+    //         const nx = x + dx;
+    //         const ny = y + dy;
+    //         if (!inBounds(nx, ny)) continue;
+    //         if (!isBlueAt(nx, ny)) continue;
+
+    //         const forward = traceLine(x, y, dx, dy);
+    //         const backward = traceLine(x - dx, y - dy, -dx, -dy);
+    //         const line = backward.reverse().concat(forward);
+
+    //         if (line.length < minLinePoints) continue;
+
+    //         let hasUnvisited = false;
+    //         for (let i = 0; i < line.length; i++) {
+    //           const idx = line[i].y * width + line[i].x;
+    //           if (!visited[idx]) {
+    //             hasUnvisited = true;
+    //             break;
+    //           }
+    //         }
+    //         if (!hasUnvisited) continue;
+
+    //         for (let i = 0; i < line.length; i++) {
+    //           const idx = line[i].y * width + line[i].x;
+    //           if (!visited[idx]) {
+    //             visited[idx] = 1;
+    //             hits.push(line[i]);
+    //           }
+    //         }
+    //         lineCount += 1;
+    //         foundLine = true;
+    //         break;
+    //       }
+
+    //       if (!foundLine) {
+    //         visited[vIdx] = 1;
+    //       }
+    //     }
+    //   }
+    //   console.log(`hits: ${hits}`)
+    //   return hits;
+    // }
+
+    function distanceSort(points) {
+      if (points.length <= 2) return points.slice();
+      const remaining = points.slice();
+      const sorted = [remaining.shift()];
+      while (remaining.length) {
+        const last = sorted[sorted.length - 1];
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < remaining.length; i++) {
+          const dx = remaining[i].x - last.x;
+          const dy = remaining[i].y - last.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+        sorted.push(remaining.splice(bestIdx, 1)[0]);
+      }
+      return sorted;
+    }
+
+    function kMeans2(points, iterations = 10) {
+      if (points.length < 2) return { a: points.slice(), b: [] };
+      let a = points[0];
+      let b = points[Math.floor(points.length / 2)];
+      let ca = { x: a.x, y: a.y };
+      let cb = { x: b.x, y: b.y };
+      let groupA = [];
+      let groupB = [];
+
+      for (let iter = 0; iter < iterations; iter++) {
+        groupA = [];
+        groupB = [];
+        for (let i = 0; i < points.length; i++) {
+          const dxA = points[i].x - ca.x;
+          const dyA = points[i].y - ca.y;
+          const dxB = points[i].x - cb.x;
+          const dyB = points[i].y - cb.y;
+          const dA = dxA * dxA + dyA * dyA;
+          const dB = dxB * dxB + dyB * dyB;
+          if (dA <= dB) groupA.push(points[i]);
+          else groupB.push(points[i]);
+        }
+        if (!groupA.length || !groupB.length) break;
+        let sumAx = 0, sumAy = 0;
+        for (let i = 0; i < groupA.length; i++) {
+          sumAx += groupA[i].x;
+          sumAy += groupA[i].y;
+        }
+        ca = { x: sumAx / groupA.length, y: sumAy / groupA.length };
+        let sumBx = 0, sumBy = 0;
+        for (let i = 0; i < groupB.length; i++) {
+          sumBx += groupB[i].x;
+          sumBy += groupB[i].y;
+        }
+        cb = { x: sumBx / groupB.length, y: sumBy / groupB.length };
+      }
+
+      return { a: groupA, b: groupB };
+    }
+
+    function splitByNeighborGap(points, gapThreshold) {
+      if (points.length < 2) return { a: points.slice(), b: [] };
+      const sorted = distanceSort(points);
+      let splitIdx = Math.floor(sorted.length / 2);
+      let bestGap = -Infinity;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const dx = sorted[i + 1].x - sorted[i].x;
+        const dy = sorted[i + 1].y - sorted[i].y;
+        const dist = Math.hypot(dx, dy);
+        if (dist >= gapThreshold && dist > bestGap) {
+          bestGap = dist;
+          splitIdx = i + 1;
+        }
+      }
+      const a = sorted.slice(0, splitIdx);
+      const b = sorted.slice(splitIdx);
+      return { a, b };
+    }
+
+    function findPerpendicularBlueLine(imageData, width, height, p1, p2) {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) return null;
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const perpX = -dy / len;
+      const perpY = dx / len;
+      const maxSteps = 40;
+      const minStep = 2;
+      const minRun = 2;
+
+      function scanDir(sign) {
+        let run = 0;
+        for (let step = minStep; step <= maxSteps; step++) {
+          const x = Math.round(midX + perpX * step * sign);
+          const y = Math.round(midY + perpY * step * sign);
+          if (x < 0 || x >= width || y < 0 || y >= height) break;
+          const idx = (y * width + x) * 4;
+          const r = imageData.data[idx];
+          const g = imageData.data[idx + 1];
+          const b = imageData.data[idx + 2];
+          if (isBluePixel(r, g, b)) {
+            run += 1;
+            if (run >= minRun) return { x, y };
+          } else {
+            run = 0;
+          }
+        }
+        return null;
+      }
+
+      return scanDir(1) || scanDir(-1);
+    }
+
+    // Trace a blue/white edge and flag a thin projection that deviates from the
+    // main edge direction as an intersection.
+    function intersectDetect(imageData, width, height, runPoints) {
+      if (runPoints.length < 6) return [];
+      const data = imageData.data;
+      const hits = [];
+      const maxSteps = 220;
+      const deviationAngle = (35 * Math.PI) / 180;
+      const minDeviationSteps = 2;
+
+      function isBlueAt(x, y) {
+        const idx = (y * width + x) * 4;
+        return isBluePixel(data[idx], data[idx + 1], data[idx + 2]);
+      }
+
+      function blueNeighborCount(x, y) {
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            if (isBlueAt(nx, ny)) count++;
+          }
+        }
+        return count;
+      }
+
+      function isEdgeBlue(x, y) {
+        if (!isBlueAt(x, y)) return false;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) return true;
+            if (!isBlueAt(nx, ny)) return true;
+          }
+        }
+        return false;
+      }
+
+      function edgeNeighbors(x, y, prevX, prevY) {
+        const neighbors = [];
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            if (nx === prevX && ny === prevY) continue;
+            if (isEdgeBlue(nx, ny)) neighbors.push({ x: nx, y: ny });
+          }
+        }
+        return neighbors;
+      }
+
+      function chooseNext(prev, curr, candidates) {
+        const vx = curr.x - prev.x;
+        const vy = curr.y - prev.y;
+        const vLen = Math.hypot(vx, vy) || 1;
+        let best = candidates[0];
+        let bestDot = -Infinity;
+        for (let i = 0; i < candidates.length; i++) {
+          const nx = candidates[i].x - curr.x;
+          const ny = candidates[i].y - curr.y;
+          const nLen = Math.hypot(nx, ny) || 1;
+          const dot = (vx * nx + vy * ny) / (vLen * nLen);
+          if (dot > bestDot) {
+            bestDot = dot;
+            best = candidates[i];
+          }
+        }
+        return best;
+      }
+
+      let start = null;
+      for (let i = 0; i < runPoints.length; i++) {
+        const x = Math.round(runPoints[i].x);
+        const y = Math.round(runPoints[i].y);
+        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
+        if (isEdgeBlue(x, y)) {
+          start = { x, y };
+          break;
+        }
+      }
+      if (!start) return hits;
+
+      const firstNeighbors = edgeNeighbors(start.x, start.y, -999, -999);
+      if (!firstNeighbors.length) return hits;
+      let prev = start;
+      let curr = firstNeighbors[0];
+      let mainDirX = curr.x - prev.x;
+      let mainDirY = curr.y - prev.y;
+      let mainLen = Math.hypot(mainDirX, mainDirY) || 1;
+      mainDirX /= mainLen;
+      mainDirY /= mainLen;
+      let deviationRun = 0;
+
+      for (let step = 0; step < maxSteps; step++) {
+        const candidates = edgeNeighbors(curr.x, curr.y, prev.x, prev.y);
+        if (!candidates.length) break;
+        const next = chooseNext(prev, curr, candidates);
+        const dx = next.x - curr.x;
+        const dy = next.y - curr.y;
+        const dLen = Math.hypot(dx, dy) || 1;
+        const dirX = dx / dLen;
+        const dirY = dy / dLen;
+        const dot = Math.max(-1, Math.min(1, mainDirX * dirX + mainDirY * dirY));
+        const angle = Math.acos(dot);
+
+        if (angle > deviationAngle) {
+          deviationRun += 1;
+          const thin = blueNeighborCount(curr.x, curr.y) <= 2;
+          if (deviationRun >= minDeviationSteps && thin) {
+            hits.push({ x: curr.x, y: curr.y });
+            break;
+          }
+        } else {
+          deviationRun = 0;
+          mainDirX = mainDirX * 0.8 + dirX * 0.2;
+          mainDirY = mainDirY * 0.8 + dirY * 0.2;
+          const norm = Math.hypot(mainDirX, mainDirY) || 1;
+          mainDirX /= norm;
+          mainDirY /= norm;
+        }
+
+        prev = curr;
+        curr = next;
+      }
+
+      return hits;
+    }
+
+    function detectBlueIntersections(
+      imageData,
+      width,
+      height,
+      angleStepDeg,
+      enableIntersect,
+      enableRgbPattern
+    ) {
       const data = imageData.data;
       const cx = width / 2;
       const cy = height / 2;
       const maxR = Math.min(cx, cy);
       const step = (angleStepDeg * Math.PI) / 180;
       const points = [];
+      const perpendicularHits = [];
+      const rgbGuides = [];
+      function runMatchesRgbPattern(runPoints) {
+        let rCount = 0;
+        let gCount = 0;
+        let bCount = 0;
+        const classes = new Array(runPoints.length);
+        for (let i = 0; i < runPoints.length; i++) {
+          const p = runPoints[i];
+          const idx = (p.y * width + p.x) * 4;
+          const c = classifyRgb(data[idx], data[idx + 1], data[idx + 2]);
+          classes[i] = c;
+          if (c === 'r') rCount += 1;
+          else if (c === 'g') gCount += 1;
+          else if (c === 'b') bCount += 1;
+        }
+        if (!rCount || !gCount || !bCount) return false;
+        const minCount = Math.min(rCount, gCount, bCount);
+        const maxCount = Math.max(rCount, gCount, bCount);
+        if (minCount / maxCount < 0.9) return false;
+        for (let i = 0; i + 2 < classes.length; i++) {
+          if (classes[i] === 'r' && classes[i + 1] === 'g' && classes[i + 2] === 'b') {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function isWhitePixel(r, g, b) {
+        return (r + g + b) / 3 >= 180;
+      }
+
+      function classifyWithNeighbors(x, y) {
+        let rCount = 0;
+        let gCount = 0;
+        let bCount = 0;
+        let wCount = 0;
+        let total = 0;
+        for (let oy = -1; oy <= 1; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            const idx = (ny * width + nx) * 4;
+            const pr = data[idx];
+            const pg = data[idx + 1];
+            const pb = data[idx + 2];
+            const c = classifyRgb(pr, pg, pb);
+            if (c === 'r') rCount += 1;
+            else if (c === 'g') gCount += 1;
+            else if (c === 'b') bCount += 1;
+            else if (isWhitePixel(pr, pg, pb)) wCount += 1;
+            total += 1;
+          }
+        }
+        if (!total) return null;
+        const max = Math.max(rCount, gCount, bCount, wCount);
+        if (max === wCount && wCount >= 5) return 'w';
+        if (max === rCount && rCount >= 4) return 'r';
+        if (max === gCount && gCount >= 4) return 'g';
+        if (max === bCount && bCount >= 4) return 'b';
+        return null;
+      }
+
+      function rgbPatternHits(runStartR, runEndR, cosA, sinA) {
+        const hits = [];
+        const guides = [];
+        let r = runEndR + 1;
+        let prevClass = null;
+        let prevR = null;
+
+        while (r <= maxR) {
+          const x = Math.round(cx + r * cosA);
+          const y = Math.round(cy + r * sinA);
+          if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) break;
+          const c = classifyWithNeighbors(x, y);
+          if (!c) {
+            r += 1;
+            continue;
+          }
+          if (prevClass && c !== prevClass) {
+            let type = null;
+            if ((prevClass === 'r' && c === 'g') || (prevClass === 'g' && c === 'r')) {
+              type = 'rg';
+            } else if ((prevClass === 'g' && c === 'b') || (prevClass === 'b' && c === 'g')) {
+              type = 'gb';
+            }
+            if (type) {
+              const midR = (prevR + r) / 2;
+              const hx = cx + midR * cosA;
+              const hy = cy + midR * sinA - 6;
+              hits.push({ x: hx, y: hy, type });
+              lastRgbPoint = { x: Math.round(hx), y: Math.round(hy) };
+              const gx1 = cx + (midR - 8) * cosA;
+              const gy1 = cy + (midR - 8) * sinA;
+              const gx2 = cx + (midR + 8) * cosA;
+              const gy2 = cy + (midR + 8) * sinA;
+              guides.push({ x1: gx1, y1: gy1, x2: gx2, y2: gy2 });
+            }
+          }
+          prevClass = c;
+          prevR = r;
+          r += 1;
+        }
+
+        if (!hits.length) return { hits: [], guides: [] };
+        return { hits, guides };
+      }
+
 
       for (let angle = 0; angle < Math.PI * 2 - 1e-6; angle += step) {
         const cosA = Math.cos(angle);
@@ -622,6 +1820,7 @@
         let inBlue = false;
         let runStart = 0;
         let lastBlue = 0;
+        let runPoints = [];
 
         for (let r = 0; r <= maxR; r += 1) {
           const x = Math.round(cx + r * cosA);
@@ -635,8 +1834,10 @@
             if (!inBlue) {
               inBlue = true;
               runStart = r;
+              runPoints = [];
             }
             lastBlue = r;
+            runPoints.push({ x, y });
           } else if (inBlue) {
             const runLen = lastBlue - runStart + 1;
             if (runLen >= 2) {
@@ -645,6 +1846,17 @@
                 x: cx + midR * cosA,
                 y: cy + midR * sinA
               });
+            }
+            if (runLen >= 6) {
+              if (enableRgbPattern) {
+                const rgbResult = rgbPatternHits(runStart, lastBlue, cosA, sinA);
+                if (rgbResult.guides && rgbResult.guides.length) {
+                  rgbGuides.push(...rgbResult.guides);
+                }
+              } else if (enableIntersect) {
+                const hits = intersectDetect(imageData, width, height, runPoints);
+                if (hits.length) perpendicularHits.push(...hits);
+              }
             }
             inBlue = false;
           }
@@ -658,13 +1870,166 @@
               y: cy + midR * sinA
             });
           }
+          if (runLen >= 6) {
+            if (enableRgbPattern) {
+              const rgbResult = rgbPatternHits(runStart, lastBlue, cosA, sinA);
+              if (rgbResult.guides && rgbResult.guides.length) {
+                rgbGuides.push(...rgbResult.guides);
+              }
+            } else if (enableIntersect) {
+              const hits = intersectDetect(imageData, width, height, runPoints);
+              if (hits.length) perpendicularHits.push(...hits);
+            }
+          }
         }
       }
 
-      return points;
+      return { points, perpendicularHits, rgbGuides };
+    }
+
+    function scanRayColors(imageData, width, height, angleStepDeg) {
+      const data = imageData.data;
+      const cx = width / 2;
+      const cy = height / 2;
+      const maxR = Math.min(cx, cy);
+      const step = (angleStepDeg * Math.PI) / 180;
+      const sequences = [];
+
+      for (let angle = 0; angle < Math.PI * 2 - 1e-6; angle += step) {
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        let prev = null;
+        let started = false;
+        const seq = [];
+        let last3 = [];
+
+        for (let r = 0; r <= maxR; r += 1) {
+          const x = Math.round(cx + r * cosA);
+          const y = Math.round(cy + r * sinA);
+          if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) break;
+          const idx = (y * width + x) * 4;
+          const c = classifyRgb(data[idx], data[idx + 1], data[idx + 2]);
+          const w = c ? c : (isWhitePixel(data[idx], data[idx + 1], data[idx + 2]) ? 'w' : null);
+          if (!started) {
+            if (prev === 'w' && w === 'r') {
+              started = true;
+              seq.push('r');
+              last3 = ['r'];
+            }
+            prev = w;
+            continue;
+          }
+          if (w && w !== prev && (w === 'r' || w === 'g' || w === 'b')) {
+            seq.push(w);
+            last3.push(w);
+            if (last3.length > 3) last3.shift();
+            if (last3.length === 3 &&
+                last3[0] === 'b' &&
+                last3[1] === 'r' &&
+                last3[2] === 'b') {
+              break;
+            }
+          }
+          prev = w;
+        }
+        sequences.push(seq);
+      }
+      return sequences;
+    }
+
+    function findCollinearLines(points, minCount, distThresh) {
+      if (points.length < minCount) return [];
+      const lines = [];
+      const seen = new Set();
+      for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) continue;
+          let angle = Math.atan2(dy, dx);
+          if (angle < 0) angle += Math.PI;
+          const nx = -Math.sin(angle);
+          const ny = Math.cos(angle);
+          const offset = nx * points[i].x + ny * points[i].y;
+          const aKey = Math.round((angle * 180) / Math.PI / 3);
+          const oKey = Math.round(offset / 8);
+          const key = `${aKey}:${oKey}`;
+          if (seen.has(key)) continue;
+
+          let count = 0;
+          let minProj = Infinity;
+          let maxProj = -Infinity;
+          for (let k = 0; k < points.length; k++) {
+            const p = points[k];
+            const d = Math.abs(nx * p.x + ny * p.y - offset);
+            if (d <= distThresh) {
+              count += 1;
+              const proj = p.x * Math.cos(angle) + p.y * Math.sin(angle);
+              if (proj < minProj) minProj = proj;
+              if (proj > maxProj) maxProj = proj;
+            }
+          }
+          if (count >= minCount) {
+            const x1 = Math.cos(angle) * minProj;
+            const y1 = Math.sin(angle) * minProj;
+            const x2 = Math.cos(angle) * maxProj;
+            const y2 = Math.sin(angle) * maxProj;
+            lines.push({ x1, y1, x2, y2 });
+            seen.add(key);
+          }
+        }
+      }
+      return lines;
+    }
+
+    function groupCollinearPoints(points, minCount, distThresh) {
+      if (points.length < minCount) return [];
+      const groups = [];
+      const seen = new Set();
+
+      for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) continue;
+          let angle = Math.atan2(dy, dx);
+          if (angle < 0) angle += Math.PI;
+          const nx = -Math.sin(angle);
+          const ny = Math.cos(angle);
+          const offset = nx * points[i].x + ny * points[i].y;
+          const aKey = Math.round((angle * 180) / Math.PI / 3);
+          const oKey = Math.round(offset / 8);
+          const key = `${aKey}:${oKey}`;
+          if (seen.has(key)) continue;
+
+          const members = [];
+          for (let k = 0; k < points.length; k++) {
+            const p = points[k];
+            const d = Math.abs(nx * p.x + ny * p.y - offset);
+            if (d <= distThresh) members.push(p);
+          }
+          if (members.length >= minCount) {
+            groups.push({ key, members });
+            seen.add(key);
+          }
+        }
+      }
+      return groups;
+    }
+
+    function colorFromKey(key) {
+      let hash = 0;
+      for (let i = 0; i < key.length; i++) {
+        hash = (hash * 31 + key.charCodeAt(i)) | 0;
+      }
+      const hue = Math.abs(hash) % 360;
+      return `hsl(${hue}, 80%, 45%)`;
     }
 
     function processFrame() {
+      const frameStart = performance.now();
       if (!video.videoWidth || !video.videoHeight) {
         animationId = requestAnimationFrame(processFrame);
         return;
@@ -680,37 +2045,305 @@
 
       const imageData = workCtx.getImageData(0, 0, targetWidth, targetHeight);
       const mode = currentDetectMode();
+      const redPoints = findRedPoints(imageData, targetWidth, targetHeight);
+      const trackedLinePoints = [];
+      if (enableLineTracking.checked && lastRayLines.length && redPoints.length) {
+        const maxPerLine = 10;
+        const distThresh = 2.5;
+        for (let i = 0; i < lastRayLines.length; i++) {
+          let found = 0;
+          for (let j = 0; j < redPoints.length; j++) {
+            if (pointLineDist(lastRayLines[i], redPoints[j]) <= distThresh) {
+              trackedLinePoints.push(redPoints[j]);
+              found += 1;
+              if (found >= maxPerLine) break;
+            }
+          }
+        }
+      }
+      const redCount = redPoints.length;
+      redStats.frames += 1;
+      redStats.total += redCount;
+      redStats.min = Math.min(redStats.min, redCount);
+      redStats.max = Math.max(redStats.max, redCount);
+      const redAvg = Math.round(redStats.total / redStats.frames);
+      redPixelCount.textContent = redCount.toLocaleString();
+      redPixelMin.textContent = redStats.min.toLocaleString();
+      redPixelMax.textContent = redStats.max.toLocaleString();
+      redPixelAvg.textContent = redAvg.toLocaleString();
 
       preview.width = video.videoWidth;
       preview.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, preview.width, preview.height);
 
-      if (mode === 'blue') {
-        const intersections = detectBlueIntersections(
-          imageData,
-          targetWidth,
-          targetHeight,
-          5
-        );
-        const fullIntersections = intersections.map((point) => ({
-          x: point.x / scale,
-          y: point.y / scale
-        }));
-
+      let raysResult = null;
+      let currentCenterFull = null;
+      if (redPoints.length) {
+        raysResult = estimateCenterFromRays(redPoints, {
+          maxLines: parseInt(radialMaxLines.value, 10),
+          minInliers: parseInt(minRedGroup.value, 10)
+        });
+        if (raysResult && raysResult.rays.length) {
+          const fullLines = raysResult.rays.map((ray) => ({
+            a: ray.line.a * scale,
+            b: ray.line.b * scale,
+            c: ray.line.c
+          }));
+          const inters = [];
+          for (let i = 0; i < fullLines.length; i++) {
+            for (let j = i + 1; j < fullLines.length; j++) {
+              const p = intersectLines(fullLines[i], fullLines[j]);
+              if (p) inters.push(p);
+            }
+          }
+          const centerFull = medianXY(inters);
+          const maxCenterDist = parseInt(centerFilterPx.value, 10);
+          const filtered = centerFull
+            ? fullLines.filter((line) => pointLineDist(line, centerFull) <= maxCenterDist)
+            : fullLines.slice();
+          lastRayLines = filtered.map((line) => ({
+            a: line.a / scale,
+            b: line.b / scale,
+            c: line.c
+          }));
+          if (centerFull) {
+            lastLineCenters.push({ x: centerFull.x, y: centerFull.y });
+            const maxCenters = 30;
+            if (lastLineCenters.length > maxCenters) {
+              lastLineCenters.splice(0, lastLineCenters.length - maxCenters);
+            }
+            let sumX = 0;
+            let sumY = 0;
+            for (let i = 0; i < lastLineCenters.length; i++) {
+              sumX += lastLineCenters[i].x;
+              sumY += lastLineCenters[i].y;
+            }
+            lastCenterFull = {
+              x: sumX / lastLineCenters.length,
+              y: sumY / lastLineCenters.length
+            };
+          } else if (lastCenterFull && lastLineCenters.length) {
+            // Keep lastCenterFull as-is when no new intersections are found.
+          }
+          ctx.save();
+          ctx.lineWidth = 2;
+          for (let i = 0; i < filtered.length; i++) {
+            const hue = (i * 37) % 360;
+            ctx.strokeStyle = `hsla(${hue}, 90%, 55%, 0.9)`;
+            const seg = lineSegmentInBounds(filtered[i], preview.width, preview.height);
+            if (!seg) continue;
+            ctx.beginPath();
+            ctx.moveTo(seg[0].x, seg[0].y);
+            ctx.lineTo(seg[1].x, seg[1].y);
+            ctx.stroke();
+          }
+          ctx.restore();
+          raysResult.center = centerFull
+            ? { x: centerFull.x / scale, y: centerFull.y / scale }
+            : raysResult.center;
+          if (centerFull) currentCenterFull = centerFull;
+        }
+      }
+      if (lastCenterFull) {
+        const bandCountInt = parseInt(bandCount.value, 10);
+        const totalAngles = 1 << bandCountInt;
+        const step = (Math.PI * 2) / totalAngles;
+        const baseAngle = (270 * Math.PI) / 180;
+        const radius = (lastArcRadius
+          ? lastArcRadius
+          : Math.min(preview.width, preview.height) * 0.45) * 6;
         ctx.save();
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
-        for (let i = 0; i < fullIntersections.length; i++) {
-          const x = fullIntersections[i].x;
-          const y = fullIntersections[i].y;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(lastCenterFull.x, lastCenterFull.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < totalAngles; i++) {
+          const angle = baseAngle + i * step;
+          const x = lastCenterFull.x + Math.cos(angle) * radius;
+          const y = lastCenterFull.y + Math.sin(angle) * radius;
+          ctx.strokeStyle = i === 0
+            ? 'rgba(255, 200, 0, 0.95)'
+            : 'rgba(255, 255, 255, 0.6)';
           ctx.beginPath();
-          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.moveTo(lastCenterFull.x, lastCenterFull.y);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (enableLineTracking.checked && trackedLinePoints.length) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 200, 0, 0.9)';
+        for (let i = 0; i < trackedLinePoints.length; i++) {
+          const x = trackedLinePoints[i].x / scale;
+          const y = trackedLinePoints[i].y / scale;
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();
+      }
 
-        statusEl.textContent = `Detected ${fullIntersections.length} blue intersections`;
-        squareCount.textContent = fullIntersections.length;
-        binaryColumns.textContent = '';
+      if (mode === 'blue') {
+        const bluePoints = findBluePoints(
+          imageData,
+          targetWidth,
+          targetHeight
+        );
+      const fullBluePoints = bluePoints.map((point) => ({
+        x: point.x / scale,
+        y: point.y / scale
+      }));
+        // const fullRgbGuides = (detection.rgbGuides || []).map((line) => ({
+        //   x1: line.x1 / scale,
+        //   y1: line.y1 / scale,
+        //   x2: line.x2 / scale,
+        //   y2: line.y2 / scale
+        // }));
+        const redWhiteHits = redPoints.map((point) => ({
+          x: point.x / scale,
+          y: point.y / scale
+        }));
+        // const fullRadialHits = radialHits.map((point) => ({
+        //   x: point.x / scale,
+        //   y: point.y / scale
+        // }));
+      if (enableBluePixels.checked) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 210, 90, 0.9)';
+        for (let i = 0; i < fullBluePoints.length; i++) {
+          const x = fullBluePoints[i].x;
+          const y = fullBluePoints[i].y;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+        if (enableBlueArc.checked && fullBluePoints.length > 2 && raysResult && raysResult.center) {
+          const centerFull = {
+            x: raysResult.center.x / scale,
+            y: raysResult.center.y / scale
+          };
+          const ransac = extractArcFromCenterRansac(
+          fullBluePoints,
+          centerFull,
+          { iters: 500, inlierTol: 6, minInliers: 80 }
+        );
+          if (ransac) {
+            lastArcRadius = ransac.radius;
+            const angles = ransac.inliers.map((p) =>
+              Math.atan2(p.y - centerFull.y, p.x - centerFull.x)
+            ).sort((a, b) => a - b);
+          let maxGap = 0;
+          let maxIdx = -1;
+          for (let i = 0; i < angles.length; i++) {
+            const a1 = angles[i];
+            const a2 = angles[(i + 1) % angles.length];
+            const gap = i === angles.length - 1
+              ? (a2 + Math.PI * 2) - a1
+              : a2 - a1;
+            if (gap > maxGap) {
+              maxGap = gap;
+              maxIdx = i;
+            }
+          }
+          const start = angles[(maxIdx + 1) % angles.length];
+          const end = angles[maxIdx];
+          ctx.strokeStyle = 'rgba(0, 210, 90, 0.95)';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(centerFull.x, centerFull.y, ransac.radius, start, end, false);
+          ctx.stroke();
+        }
+      }
+        rgb_points = [];
+        lastRgbPoint = null;
+
+        if (redWhiteHits.length) {
+          ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+          for (let i = 0; i < redWhiteHits.length; i++) {
+            const x = redWhiteHits[i].x;
+            const y = redWhiteHits[i].y;
+            ctx.beginPath();
+            ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Red clustering disabled for performance.
+        // RGB pattern filter disabled.
+        // if (enableRadial.checked) {
+        //   const fullRadialHits = radialHits.map((point) => ({
+        //     x: point.x / scale,
+        //     y: point.y / scale
+        //   }));
+        //   ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
+        //   for (let i = 0; i < fullRadialHits.length; i++) {
+        //     const x = fullRadialHits[i].x;
+        //     const y = fullRadialHits[i].y;
+        //     ctx.beginPath();
+        //     ctx.arc(x, y, 3, 0, Math.PI * 2);
+        //     ctx.fill();
+        //   }
+        // }
+        ctx.restore();
+
+        // RGB pattern filter disabled.
+
+        statusEl.textContent = `Detected ${fullBluePoints.length} blue pixels`;
+        squareCount.textContent = fullBluePoints.length;
+        const bandCountInt = parseInt(bandCount.value, 10);
+        const totalAngles = 1 << bandCountInt;
+        const step = (Math.PI * 2) / totalAngles;
+        const baseAngle = (270 * Math.PI) / 180;
+        const whiteThresh = 125;
+        const fullFrame = ctx.getImageData(0, 0, preview.width, preview.height);
+
+        const activeCenter = currentCenterFull || lastCenterFull;
+        if (activeCenter) {
+          const centerX = activeCenter.x;
+          const centerY = activeCenter.y;
+          const rawBits = sampleSubdividingLineRawBits(
+            fullFrame,
+            centerX,
+            centerY,
+            baseAngle,
+            180
+          );
+          const reducedBits = rawBits
+            ? reduceBitsByBands(rawBits, bandCountInt)
+            : null;
+          rawLineBits.style.fontSize = '11px';
+          rawLineBits.textContent = reducedBits && reducedBits.length
+            ? reducedBits.join('')
+            : '(no data)';
+
+          const columns = [];
+          for (let i = 0; i < totalAngles; i++) {
+            const angle = baseAngle + i * step;
+            const bits = sampleSubdividingLineBits(
+              fullFrame,
+              centerX,
+              centerY,
+              angle,
+              bandCountInt,
+              whiteThresh
+            );
+            if (bits) columns.push(bits.join(''));
+            else columns.push('-'.repeat(bandCountInt));
+          }
+          allLineBits.style.fontSize = '11px';
+          allLineBits.textContent = columns.join(' ');
+          binaryColumns.style.fontSize = '10px';
+          binaryColumns.innerHTML = columns
+            .map((bits) => `<div class="col">${bits}</div>`)
+            .join('');
+        } else {
+          rawLineBits.textContent = '(no data)';
+          allLineBits.textContent = '';
+          binaryColumns.textContent = '';
+        }
         lastNCenters.length = 0;
       } else {
         const centers = detectGreenCenters(
@@ -944,6 +2577,14 @@
           }
           ctx.stroke();
         });
+        ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
+        for (let i = 0; i < fullRadialHits.length; i++) {
+          const x = fullRadialHits[i].x;
+          const y = fullRadialHits[i].y;
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.restore();
 
         if (sharedCenter && arcInfos.length === 2) {
@@ -961,6 +2602,7 @@
               const y2 = sharedCenter.cy + outer.r * Math.sin(angle);
               return sampleLineBits(frameData, x1, y1, x2, y2, sectionCount);
             });
+            binaryColumns.style.fontSize = '13px';
             binaryColumns.innerHTML = columns
               .map((bits) => `<div class="col">${bits.join(' ')}</div>`)
               .join('');
@@ -972,8 +2614,14 @@
         }
 
         statusEl.textContent = `Detected ${centers.length} green regions in ${arcClusters.length} arcs`;
+        lastRgbPoint = null;
         squareCount.textContent = centers.length;
       }
+      const frameMs = performance.now() - frameStart;
+      frameStats.frames += 1;
+      frameStats.totalMs += frameMs;
+      avgFrameMs.textContent = Math.round(frameStats.totalMs / frameStats.frames).toLocaleString();
+
       animationId = requestAnimationFrame(processFrame);
     }
 
@@ -1003,7 +2651,17 @@
     minArea.addEventListener('input', updateLabels);
     downscale.addEventListener('input', updateLabels);
     maxNeighbor.addEventListener('input', updateLabels);
+    groupGap.addEventListener('input', updateLabels);
+    blueDelta.addEventListener('input', updateLabels);
+    blueMinSize.addEventListener('input', updateLabels);
+    redDelta.addEventListener('input', updateLabels);
+    minRedGroup.addEventListener('input', updateLabels);
+    maxRedGroupDist.addEventListener('input', updateLabels);
+    maxBoundarySteps.addEventListener('input', updateLabels);
+    radialWhite.addEventListener('input', updateLabels);
     sections.addEventListener('input', updateLabels);
+    bandCount.addEventListener('input', updateLabels);
+    centerFilterPx.addEventListener('input', updateLabels);
     centerWindow.addEventListener('input', updateLabels);
     detectModeInputs.forEach((input) => {
       input.addEventListener('change', updateLabels);

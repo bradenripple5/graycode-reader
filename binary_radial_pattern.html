@@ -58,10 +58,10 @@
 
   <div class="container">
     <div class="controls">
-      <label for="bandCount">Number of bands: <span id="bandCountVal">9</span></label>
-      <input id="bandCount" type="range" min="1" max="12" value="9">
+      <label for="bandCount">Number of bands: <span id="bandCountVal">6</span></label>
+      <input id="bandCount" type="range" min="1" max="12" value="6">
       <label for="circleSize">Circle radius: <span id="circleSizeVal">484</span>px</label>
-      <input id="circleSize" type="range" min="10" max="1000" value="484">
+      <input id="circleSize" type="range" min="10" max="350" value="350">
       <label>
         <input id="invertBits" type="checkbox">
         Invert bits
@@ -79,7 +79,7 @@
         Show numbers
       </label>
       <label>
-        <input id="showGuides" type="checkbox" checked>
+        <input id="showGuides" type="checkbox">
         Show guide lines
       </label>
       <label>
@@ -157,10 +157,10 @@
         drawAngleWedges(ctx, centerX, centerY, size / 2, 5, 'rgba(0, 0, 255, 0.2)');
       }
       if (showAngleGuides) {
-        drawAngleGuides(ctx, centerX, centerY, size / 2, 45, 'rgba(0, 140, 255, 0.75)', 1.2);
+        drawAngleGuides(ctx, centerX, centerY, size / 2, 45, 'rgba(255, 0, 0, 1)', 1.2);
       }
       if (showAngleGuides5) {
-        drawAngleGuides(ctx, centerX, centerY, size / 2, 5, 'rgba(0, 0, 255, 0.45)', 0.8);
+        drawAngleGuides(ctx, centerX, centerY, size / 2, 5, 'rgba(255, 0, 0, 1)', 0.8);
       }
 
       for (let ringIdx = 0; ringIdx < numRings; ringIdx++) {
@@ -183,9 +183,7 @@
           ctx.closePath();
           ctx.fill();
 
-          ctx.strokeStyle = '#CCCCCC';
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
+          // No segment borders to keep the pattern clean.
         }
       }
 
@@ -194,10 +192,11 @@
         const blueInnerStart = Math.max(0, gapRadius - markerThickness);
         const blueOuterStart = patternOuterRadius;
 
-        ctx.fillStyle = '#0000FF';
         if (blueInnerStart < gapRadius) {
+          ctx.fillStyle = '#00AA00';
           drawRing(ctx, centerX, centerY, blueInnerStart, gapRadius);
         }
+        ctx.fillStyle = '#0000FF';
         drawRing(ctx, centerX, centerY, blueOuterStart, blueOuterStart + markerThickness);
       }
 
@@ -262,6 +261,10 @@
       ctx.save();
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.lineWidth = 0.75;
+      const repeatCount = 10;
+      const bandColors = ['#FF0000', '#00FF00', '#0000FF'];
+      const segments = repeatCount * bandColors.length;
+      const capLength = Math.max(8, labelRadius * 0.02);
       for (let segIdx = 0; segIdx < columnCount; segIdx++) {
         const angle = ((segIdx + 0.5) / columnCount) * 2 * Math.PI + angleOffset;
         const x = cx + Math.cos(angle) * labelRadius;
@@ -270,6 +273,19 @@
         ctx.moveTo(cx, cy);
         ctx.lineTo(x, y);
         ctx.stroke();
+
+        const capStart = labelRadius - capLength;
+        const capX = cx + Math.cos(angle) * capStart;
+        const capY = cy + Math.sin(angle) * capStart;
+        const colorIdx = Math.floor((segIdx / columnCount) * segments) % segments;
+        ctx.strokeStyle = bandColors[colorIdx % bandColors.length];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(capX, capY);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.lineWidth = 0.75;
       }
       ctx.restore();
     }
@@ -277,7 +293,7 @@
     function drawAngleGuides(ctx, cx, cy, radius, stepDeg, strokeStyle, lineWidth) {
       ctx.save();
       ctx.strokeStyle = strokeStyle;
-      ctx.lineWidth = lineWidth;
+      ctx.lineWidth = lineWidth * 3;
       const steps = Math.max(1, Math.round(360 / stepDeg));
       for (let i = 0; i < steps; i++) {
         const angle = (i / steps) * 2 * Math.PI;

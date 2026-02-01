@@ -1,0 +1,1749 @@
+how do i make detect radial lines that intersect with points that are found along these arcs ? <!DOCTYPE html>
+<html lang="en">
+<head>
+&nbsp;&nbsp;<meta charset="UTF-8">
+&nbsp;&nbsp;<meta name="viewport" content="width=device-width, initial-scale=1.0">
+&nbsp;&nbsp;<title>Green Square Detector</title>
+&nbsp;&nbsp;<style>
+&nbsp;&nbsp;&nbsp;&nbsp;body {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-family: Arial, sans-serif;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;max-width: 1100px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin: 0 auto;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 20px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #f5f5f5;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;h1 {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text-align: center;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #333;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.container {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: white;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 20px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border-radius: 8px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.controls {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;display: flex;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;flex-wrap: wrap;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;gap: 12px 18px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;align-items: center;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin-bottom: 16px;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.controls.collapsed {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;display: none;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.toggle-btn {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #222;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #fff;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border: none;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width: 34px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;height: 34px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border-radius: 4px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 18px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;line-height: 34px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;text-align: center;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cursor: pointer;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin-bottom: 10px;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.controls label {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 14px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #333;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.controls input[type="range"] {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width: 160px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;vertical-align: middle;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;button {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #007bff;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: white;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border: none;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 10px 18px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border-radius: 4px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cursor: pointer;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 14px;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;button:hover {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #0056b3;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.binary-columns {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;display: flex;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;gap: 10px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;flex-wrap: wrap;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin-bottom: 10px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-family: "Courier New", Courier, monospace;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 13px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #111;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #f0f0f0;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border-radius: 6px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;padding: 8px 10px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;min-height: 26px;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.binary-columns .col {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;white-space: nowrap;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.canvas-wrap {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;position: relative;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;canvas {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;display: block;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width: 100%;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;height: auto;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;background: #111;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;border-radius: 6px;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.info {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;margin-top: 10px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 13px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #666;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;&nbsp;&nbsp;.metric {
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-size: 14px;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;color: #145a32;
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;font-weight: 600;
+&nbsp;&nbsp;&nbsp;&nbsp;}
+&nbsp;&nbsp;</style>
+</head>
+<body>
+&nbsp;&nbsp;<h1>Green Square Detector</h1>
+&nbsp;&nbsp;<div class="container">
+&nbsp;&nbsp;&nbsp;&nbsp;<button id="toggleControls" class="toggle-btn" title="Toggle controls">+</button>
+&nbsp;&nbsp;&nbsp;&nbsp;<div class="controls">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button id="startBtn">Start</button>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button id="stopBtn" disabled>Stop</button>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<div class="metric">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Detections: <span id="squareCount">0</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</div>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input type="radio" name="detectMode" value="blue" checked>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Blue band intersections
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input type="radio" name="detectMode" value="green">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Green squares
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="enableIntersect" type="checkbox">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Intersect detection
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Min neighbor distance: <span id="groupGapVal">20</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="groupGap" type="range" min="1" max="200" value="20" step="1">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Min green: <span id="minGreenVal">120</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="minGreen" type="range" min="0" max="255" value="120">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Green delta: <span id="deltaVal">40</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="delta" type="range" min="0" max="255" value="40">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Min area: <span id="minAreaVal">1</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="minArea" type="range" min="1" max="100" value="1">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Downscale width: <span id="downscaleVal">600</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="downscale" type="range" min="160" max="800" value="600" step="20">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Max neighbor dist: <span id="maxNeighborVal">60</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="maxNeighbor" type="range" min="5" max="200" value="60" step="5">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Sections: <span id="sectionsVal">12</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="sections" type="range" min="4" max="64" value="12" step="1">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<label>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Center avg window: <span id="centerWindowVal">5</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<input id="centerWindow" type="range" min="1" max="30" value="5" step="1">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</label>
+&nbsp;&nbsp;&nbsp;&nbsp;</div>
+    <div class="binary-columns" id="binaryColumns"></div>
+    <div class="canvas-wrap">
+      <canvas id="preview"></canvas>
+    </div>
+    <div class="info" id="status">Idle.</div>
+  </div>
+  <video id="video" autoplay playsinline style="display:none;"></video>
+  <script>
+    const video = document.getElementById('video');
+    const preview = document.getElementById('preview');
+    const ctx = preview.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const minGreen = document.getElementById('minGreen');
+    const delta = document.getElementById('delta');
+    const minArea = document.getElementById('minArea');
+    const downscale = document.getElementById('downscale');
+    const minGreenVal = document.getElementById('minGreenVal');
+    const deltaVal = document.getElementById('deltaVal');
+    const minAreaVal = document.getElementById('minAreaVal');
+    const downscaleVal = document.getElementById('downscaleVal');
+    const squareCount = document.getElementById('squareCount');
+    const maxNeighbor = document.getElementById('maxNeighbor');
+    const maxNeighborVal = document.getElementById('maxNeighborVal');
+    const groupGap = document.getElementById('groupGap');
+    const groupGapVal = document.getElementById('groupGapVal');
+    const sections = document.getElementById('sections');
+    const sectionsVal = document.getElementById('sectionsVal');
+    const centerWindow = document.getElementById('centerWindow');
+    const centerWindowVal = document.getElementById('centerWindowVal');
+    const detectModeInputs = document.querySelectorAll('input[name="detectMode"]');
+    const enableIntersect = document.getElementById('enableIntersect');
+    const binaryColumns = document.getElementById('binaryColumns');
+    const controls = document.querySelector('.controls');
+    const toggleControls = document.getElementById('toggleControls');
+    let stream = null;
+    let animationId = null;
+    let workCanvas = document.createElement('canvas');
+    let workCtx = workCanvas.getContext('2d');
+    let lastNCenters = [];
+    function updateLabels() {
+      minGreenVal.textContent = minGreen.value;
+      deltaVal.textContent = delta.value;
+      minAreaVal.textContent = minArea.value;
+      downscaleVal.textContent = downscale.value;
+      maxNeighborVal.textContent = maxNeighbor.value;
+      groupGapVal.textContent = groupGap.value;
+      sectionsVal.textContent = sections.value;
+      centerWindowVal.textContent = centerWindow.value;
+    }
+    function currentDetectMode() {
+      for (let i = 0; i < detectModeInputs.length; i++) {
+        if (detectModeInputs[i].checked) return detectModeInputs[i].value;
+      }
+      return 'blue';
+    }
+    function clusterByNearest(points, maxDist) {
+      if (!points.length) return [];
+      const visited = new Array(points.length).fill(false);
+      const clusters = [];
+      while (true) {
+        let startIdx = -1;
+        for (let i = 0; i < points.length; i++) {
+          if (!visited[i]) {
+            startIdx = i;
+            break;
+          }
+        }
+        if (startIdx === -1) break;
+        const cluster = [];
+        let currentIdx = startIdx;
+        visited[currentIdx] = true;
+        cluster.push(points[currentIdx]);
+        while (true) {
+          let nearestIdx = -1;
+          let nearestDist = Infinity;
+          const current = points[currentIdx];
+          for (let i = 0; i < points.length; i++) {
+            if (visited[i]) continue;
+            const dx = points[i].x - current.x;
+            const dy = points[i].y - current.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearestIdx = i;
+            }
+          }
+          if (nearestIdx === -1 || nearestDist > maxDist) break;
+          visited[nearestIdx] = true;
+          cluster.push(points[nearestIdx]);
+          currentIdx = nearestIdx;
+        }
+        clusters.push(cluster);
+      }
+      return clusters;
+    }
+    function fitCircleKasa(points) {
+      if (points.length < 3) return null;
+      let sumX = 0;
+      let sumY = 0;
+      let sumX2 = 0;
+      let sumY2 = 0;
+      let sumXY = 0;
+      let sumX3 = 0;
+      let sumY3 = 0;
+      let sumX2Y = 0;
+      let sumXY2 = 0;
+      for (let i = 0; i < points.length; i++) {
+        const x = points[i].x;
+        const y = points[i].y;
+        const x2 = x * x;
+        const y2 = y * y;
+        sumX += x;
+        sumY += y;
+        sumX2 += x2;
+        sumY2 += y2;
+        sumXY += x * y;
+        sumX3 += x2 * x;
+        sumY3 += y2 * y;
+        sumX2Y += x2 * y;
+        sumXY2 += x * y2;
+      }
+      const n = points.length;
+      const c = n * sumX2 - sumX * sumX;
+      const d = n * sumXY - sumX * sumY;
+      const e = n * sumX3 + n * sumXY2 - (sumX2 + sumY2) * sumX;
+      const g = n * sumY2 - sumY * sumY;
+      const h = n * sumX2Y + n * sumY3 - (sumX2 + sumY2) * sumY;
+      const denom = 2 * (c * g - d * d);
+      if (Math.abs(denom) < 1e-12) return null;
+      const cx = (g * e - d * h) / denom;
+      const cy = (c * h - d * e) / denom;
+      const r = Math.sqrt(
+        (sumX2 - 2 * cx * sumX + n * cx * cx +
+          sumY2 - 2 * cy * sumY + n * cy * cy) / n
+      );
+      return { cx, cy, r };
+    }
+    function findArcSpan(points, cx, cy) {
+      if (points.length < 2) return null;
+      const angles = points.map((p) => Math.atan2(p.y - cy, p.x - cx));
+      angles.sort((a, b) => a - b);
+      if (angles.length === 2) {
+        return { start: angles[0], end: angles[1] };
+      }
+      let maxGap = -1;
+      let gapIndex = -1;
+      for (let i = 0; i < angles.length; i++) {
+        const a = angles[i];
+        const b = angles[(i + 1) % angles.length];
+        const gap = i + 1 < angles.length ? b - a : (b + Math.PI * 2) - a;
+        if (gap > maxGap) {
+          maxGap = gap;
+          gapIndex = i;
+        }
+      }
+      if (gapIndex === -1) return null;
+      const start = angles[(gapIndex + 1) % angles.length];
+      const end = angles[gapIndex];
+      return { start, end };
+    }
+    function median(values) {
+      if (!values.length) return null;
+      const sorted = values.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+      }
+      return sorted[mid];
+    }
+    function meanRadius(points, cx, cy) {
+      if (!points.length) return 0;
+      let sum = 0;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - cx;
+        const dy = points[i].y - cy;
+        sum += Math.hypot(dx, dy);
+      }
+      return sum / points.length;
+    }
+    function inferArcAngles(points, cx, cy, arc) {
+      if (points.length < 2) return [];
+      const angles = points.map((p) => {
+        let a = Math.atan2(p.y - cy, p.x - cx);
+        if (a < 0) a += Math.PI * 2;
+        return a;
+      });
+      angles.sort((a, b) => a - b);
+      const gaps = [];
+      for (let i = 0; i < angles.length; i++) {
+        const a = angles[i];
+        const b = i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2;
+        gaps.push(b - a);
+      }
+      const step = median(gaps);
+      if (!step || step <= 0) return [];
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= Math.PI * 2;
+      let base = angles[0];
+      while (base < arcEnd) base += Math.PI * 2;
+      while (base > arcStart) base -= Math.PI * 2;
+      let first = base;
+      while (first - step >= arcEnd) first -= step;
+      const inferred = [];
+      const maxLines = 200;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        inferred.push(a);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+    function inferArcAnglesFromCommonSpacing(points, cx, cy, arc, minPoints) {
+      if (!arc || points.length < minPoints) return [];
+      const twoPi = Math.PI * 2;
+      const angles = points
+        .map((p) => {
+          let a = Math.atan2(p.y - cy, p.x - cx);
+          if (a < 0) a += twoPi;
+          return a;
+        })
+        .sort((a, b) => a - b);
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= twoPi;
+      const normalized = angles
+        .map((angle) => {
+          let a = angle;
+          while (a > arcStart) a -= twoPi;
+          while (a <= arcEnd) a += twoPi;
+          return a;
+        })
+        .filter((angle) => angle > arcEnd - 1e-6 && angle <= arcStart + 1e-6)
+        .sort((a, b) => a - b);
+      if (normalized.length < minPoints) return [];
+      const gaps = [];
+      for (let i = 0; i + 1 < normalized.length; i++) {
+        gaps.push(normalized[i + 1] - normalized[i]);
+      }
+      const step = median(gaps);
+      if (!step || step <= 0) return [];
+      let first = normalized[0];
+      while (first - step >= arcEnd) first -= step;
+      const inferred = [];
+      const maxLines = 300;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        let wrapped = a % twoPi;
+        if (wrapped < 0) wrapped += twoPi;
+        inferred.push(wrapped);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+    function inferArcAnglesFromDistance(points, cx, cy, arc, maxDist) {
+      if (points.length < 2) return [];
+      const r = meanRadius(points, cx, cy);
+      if (r <= 0) return [];
+      const distances = [];
+      for (let i = 0; i < points.length; i++) {
+        let nearestDist = Infinity;
+        for (let j = 0; j < points.length; j++) {
+          if (i === j) continue;
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < nearestDist) nearestDist = dist;
+        }
+        if (nearestDist !== Infinity && nearestDist <= maxDist) {
+          distances.push(nearestDist);
+        }
+      }
+      const commonDist = median(distances);
+      if (!commonDist || commonDist <= 0 || commonDist > 2 * r) return [];
+      const baseAngle = 2 * Math.asin(commonDist / (2 * r));
+      if (!baseAngle || baseAngle <= 0) return [];
+      const step = baseAngle / 2;
+      if (!step || step <= 0) return [];
+      let arcStart = arc.start;
+      let arcEnd = arc.end;
+      if (arcStart < arcEnd) arcEnd -= Math.PI * 2;
+      const rawAngles = points.map((p) => Math.atan2(p.y - cy, p.x - cx));
+      const ref = rawAngles.length ? rawAngles[0] : arcStart;
+      let first = ref;
+      while (first > arcStart) first -= step;
+      while (first + step <= arcEnd) first += step;
+      const inferred = [];
+      const maxLines = 300;
+      for (let a = first; a <= arcStart + 1e-6; a += step) {
+        inferred.push(a);
+        if (inferred.length >= maxLines) break;
+      }
+      return inferred;
+    }
+    function sampleLineBits(imageData, x1, y1, x2, y2, sectionCount) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const bits = [];
+      const gMin = parseInt(minGreen.value, 10);
+      const dMin = parseInt(delta.value, 10);
+      for (let i = 0; i < sectionCount; i++) {
+        const t = (i + 0.5) / sectionCount;
+        const x = Math.round(x1 + (x2 - x1) * t);
+        const y = Math.round(y1 + (y2 - y1) * t);
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+          bits.push(0);
+          continue;
+        }
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        bits.push(g >= gMin && g - r >= dMin && g - b >= dMin ? 1 : 0);
+      }
+      return bits;
+    }
+    function buildVideoConstraints() {
+      return { facingMode: { ideal: 'environment' } };
+    }
+    function stopStream(resetUi) {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      if (video.srcObject) {
+        video.srcObject = null;
+      }
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      if (resetUi) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        statusEl.textContent = 'Idle.';
+      }
+    }
+    function detectGreenCenters(imageData, width, height, areaThreshold) {
+      const data = imageData.data;
+      const mask = new Uint8Array(width * height);
+      const gMin = parseInt(minGreen.value, 10);
+      const dMin = parseInt(delta.value, 10);
+      const centers = [];
+      for (let i = 0, p = 0; i < mask.length; i++, p += 4) {
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        if (g >= gMin && g - r >= dMin && g - b >= dMin) {
+          mask[i] = 1;
+        }
+      }
+      const stack = [];
+      const w = width;
+      const h = height;
+      for (let idx = 0; idx < mask.length; idx++) {
+        if (mask[idx] !== 1) continue;
+        mask[idx] = 2;
+        stack.length = 0;
+        stack.push(idx);
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        while (stack.length) {
+          const cur = stack.pop();
+          const y = Math.floor(cur / w);
+          const x = cur - y * w;
+          sumX += x;
+          sumY += y;
+          count += 1;
+          const left = cur - 1;
+          const right = cur + 1;
+          const up = cur - w;
+          const down = cur + w;
+          if (x > 0 && mask[left] === 1) {
+            mask[left] = 2;
+            stack.push(left);
+          }
+          if (x + 1 < w && mask[right] === 1) {
+            mask[right] = 2;
+            stack.push(right);
+          }
+          if (y > 0 && mask[up] === 1) {
+            mask[up] = 2;
+            stack.push(up);
+          }
+          if (y + 1 < h && mask[down] === 1) {
+            mask[down] = 2;
+            stack.push(down);
+          }
+        }
+        if (count >= areaThreshold) {
+          centers.push({
+            x: sumX / count,
+            y: sumY / count,
+            area: count
+          });
+        }
+      }
+      return centers;
+    }
+    function isBluePixel(r, g, b) {
+      return b >= 200 && r <= 60 && g <= 60 && b - Math.max(r, g) >= 120;
+    }
+    function distanceSort(points) {
+      if (points.length <= 2) return points.slice();
+      const remaining = points.slice();
+      const sorted = [remaining.shift()];
+      while (remaining.length) {
+        const last = sorted[sorted.length - 1];
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < remaining.length; i++) {
+          const dx = remaining[i].x - last.x;
+          const dy = remaining[i].y - last.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+        sorted.push(remaining.splice(bestIdx, 1)[0]);
+      }
+      return sorted;
+    }
+    function kMeans2(points, iterations = 10) {
+      if (points.length < 2) return { a: points.slice(), b: [] };
+      let a = points[0];
+      let b = points[Math.floor(points.length / 2)];
+      let ca = { x: a.x, y: a.y };
+      let cb = { x: b.x, y: b.y };
+      let groupA = [];
+      let groupB = [];
+      for (let iter = 0; iter < iterations; iter++) {
+        groupA = [];
+        groupB = [];
+        for (let i = 0; i < points.length; i++) {
+          const dxA = points[i].x - ca.x;
+          const dyA = points[i].y - ca.y;
+          const dxB = points[i].x - cb.x;
+          const dyB = points[i].y - cb.y;
+          const dA = dxA * dxA + dyA * dyA;
+          const dB = dxB * dxB + dyB * dyB;
+          if (dA <= dB) groupA.push(points[i]);
+          else groupB.push(points[i]);
+        }
+        if (!groupA.length || !groupB.length) break;
+        let sumAx = 0, sumAy = 0;
+        for (let i = 0; i < groupA.length; i++) {
+          sumAx += groupA[i].x;
+          sumAy += groupA[i].y;
+        }
+        ca = { x: sumAx / groupA.length, y: sumAy / groupA.length };
+        let sumBx = 0, sumBy = 0;
+        for (let i = 0; i < groupB.length; i++) {
+          sumBx += groupB[i].x;
+          sumBy += groupB[i].y;
+        }
+        cb = { x: sumBx / groupB.length, y: sumBy / groupB.length };
+      }
+      return { a: groupA, b: groupB };
+    }
+    function splitByNeighborGap(points, gapThreshold) {
+      if (points.length < 2) return { a: points.slice(), b: [] };
+      const sorted = distanceSort(points);
+      let splitIdx = Math.floor(sorted.length / 2);
+      let bestGap = -Infinity;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const dx = sorted[i + 1].x - sorted[i].x;
+        const dy = sorted[i + 1].y - sorted[i].y;
+        const dist = Math.hypot(dx, dy);
+        if (dist >= gapThreshold && dist > bestGap) {
+          bestGap = dist;
+          splitIdx = i + 1;
+        }
+      }
+      const a = sorted.slice(0, splitIdx);
+      const b = sorted.slice(splitIdx);
+      return { a, b };
+    }
+    function findPerpendicularBlueLine(imageData, width, height, p1, p2) {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) return null;
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const perpX = -dy / len;
+      const perpY = dx / len;
+      const maxSteps = 40;
+      const minStep = 2;
+      const minRun = 2;
+      function scanDir(sign) {
+        let run = 0;
+        for (let step = minStep; step <= maxSteps; step++) {
+          const x = Math.round(midX + perpX * step * sign);
+          const y = Math.round(midY + perpY * step * sign);
+          if (x < 0 || x >= width || y < 0 || y >= height) break;
+          const idx = (y * width + x) * 4;
+          const r = imageData.data[idx];
+          const g = imageData.data[idx + 1];
+          const b = imageData.data[idx + 2];
+          if (isBluePixel(r, g, b)) {
+            run += 1;
+            if (run >= minRun) return { x, y };
+          } else {
+            run = 0;
+          }
+        }
+        return null;
+      }
+      return scanDir(1) || scanDir(-1);
+    }
+    // Trace a blue/white edge and flag a thin projection that deviates from the
+    // main edge direction as an intersection.
+    function intersectDetect(imageData, width, height, runPoints) {
+      if (runPoints.length < 6) return [];
+      const data = imageData.data;
+      const hits = [];
+      const maxSteps = 220;
+      const deviationAngle = (35 * Math.PI) / 180;
+      const minDeviationSteps = 2;
+      function isBlueAt(x, y) {
+        const idx = (y * width + x) * 4;
+        return isBluePixel(data[idx], data[idx + 1], data[idx + 2]);
+      }
+      function blueNeighborCount(x, y) {
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            if (isBlueAt(nx, ny)) count++;
+          }
+        }
+        return count;
+      }
+      function isEdgeBlue(x, y) {
+        if (!isBlueAt(x, y)) return false;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) return true;
+            if (!isBlueAt(nx, ny)) return true;
+          }
+        }
+        return false;
+      }
+      function edgeNeighbors(x, y, prevX, prevY) {
+        const neighbors = [];
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            if (nx === prevX && ny === prevY) continue;
+            if (isEdgeBlue(nx, ny)) neighbors.push({ x: nx, y: ny });
+          }
+        }
+        return neighbors;
+      }
+      function chooseNext(prev, curr, candidates) {
+        const vx = curr.x - prev.x;
+        const vy = curr.y - prev.y;
+        const vLen = Math.hypot(vx, vy) || 1;
+        let best = candidates[0];
+        let bestDot = -Infinity;
+        for (let i = 0; i < candidates.length; i++) {
+          const nx = candidates[i].x - curr.x;
+          const ny = candidates[i].y - curr.y;
+          const nLen = Math.hypot(nx, ny) || 1;
+          const dot = (vx * nx + vy * ny) / (vLen * nLen);
+          if (dot > bestDot) {
+            bestDot = dot;
+            best = candidates[i];
+          }
+        }
+        return best;
+      }
+      let start = null;
+      for (let i = 0; i < runPoints.length; i++) {
+        const x = Math.round(runPoints[i].x);
+        const y = Math.round(runPoints[i].y);
+        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
+        if (isEdgeBlue(x, y)) {
+          start = { x, y };
+          break;
+        }
+      }
+      if (!start) return hits;
+      const firstNeighbors = edgeNeighbors(start.x, start.y, -999, -999);
+      if (!firstNeighbors.length) return hits;
+      let prev = start;
+      let curr = firstNeighbors[0];
+      let mainDirX = curr.x - prev.x;
+      let mainDirY = curr.y - prev.y;
+      let mainLen = Math.hypot(mainDirX, mainDirY) || 1;
+      mainDirX /= mainLen;
+      mainDirY /= mainLen;
+      let deviationRun = 0;
+      for (let step = 0; step < maxSteps; step++) {
+        const candidates = edgeNeighbors(curr.x, curr.y, prev.x, prev.y);
+        if (!candidates.length) break;
+        const next = chooseNext(prev, curr, candidates);
+        const dx = next.x - curr.x;
+        const dy = next.y - curr.y;
+        const dLen = Math.hypot(dx, dy) || 1;
+        const dirX = dx / dLen;
+        const dirY = dy / dLen;
+        const dot = Math.max(-1, Math.min(1, mainDirX * dirX + mainDirY * dirY));
+        const angle = Math.acos(dot);
+        if (angle > deviationAngle) {
+          deviationRun += 1;
+          const thin = blueNeighborCount(curr.x, curr.y) <= 2;
+          if (deviationRun >= minDeviationSteps && thin) {
+            hits.push({ x: curr.x, y: curr.y });
+            break;
+          }
+        } else {
+          deviationRun = 0;
+          mainDirX = mainDirX * 0.8 + dirX * 0.2;
+          mainDirY = mainDirY * 0.8 + dirY * 0.2;
+          const norm = Math.hypot(mainDirX, mainDirY) || 1;
+          mainDirX /= norm;
+          mainDirY /= norm;
+        }
+        prev = curr;
+        curr = next;
+      }
+      return hits;
+    }
+    function detectBlueIntersections(imageData, width, height, angleStepDeg, enableIntersect) {
+      const data = imageData.data;
+      const cx = width / 2;
+      const cy = height / 2;
+      const maxR = Math.min(cx, cy);
+      const step = (angleStepDeg * Math.PI) / 180;
+      const points = [];
+      const perpendicularHits = [];
+      for (let angle = 0; angle < Math.PI * 2 - 1e-6; angle += step) {
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        let inBlue = false;
+        let runStart = 0;
+        let lastBlue = 0;
+        let runPoints = [];
+        for (let r = 0; r <= maxR; r += 1) {
+          const x = Math.round(cx + r * cosA);
+          const y = Math.round(cy + r * sinA);
+          if (x < 0 || x >= width || y < 0 || y >= height) break;
+          const idx = (y * width + x) * 4;
+          const pr = data[idx];
+          const pg = data[idx + 1];
+          const pb = data[idx + 2];
+          if (isBluePixel(pr, pg, pb)) {
+            if (!inBlue) {
+              inBlue = true;
+              runStart = r;
+              runPoints = [];
+            }
+            lastBlue = r;
+            runPoints.push({ x, y });
+          } else if (inBlue) {
+            const runLen = lastBlue - runStart + 1;
+            if (runLen >= 2) {
+              const midR = runStart + runLen / 2;
+              points.push({
+                x: cx + midR * cosA,
+                y: cy + midR * sinA
+              });
+            }
+            if (enableIntersect && runLen >= 6) {
+              const hits = intersectDetect(imageData, width, height, runPoints);
+              if (hits.length) perpendicularHits.push(...hits);
+            }
+            inBlue = false;
+          }
+        }
+        if (inBlue) {
+          const runLen = lastBlue - runStart + 1;
+          if (runLen >= 2) {
+            const midR = runStart + runLen / 2;
+            points.push({
+              x: cx + midR * cosA,
+              y: cy + midR * sinA
+            });
+          }
+          if (enableIntersect && runLen >= 6) {
+            const hits = intersectDetect(imageData, width, height, runPoints);
+            if (hits.length) perpendicularHits.push(...hits);
+          }
+        }
+      }
+      return { points, perpendicularHits };
+    }
+    function processFrame() {
+      if (!video.videoWidth || !video.videoHeight) {
+        animationId = requestAnimationFrame(processFrame);
+        return;
+      }
+      const targetWidth = parseInt(downscale.value, 10);
+      const scale = targetWidth / video.videoWidth;
+      const targetHeight = Math.max(1, Math.round(video.videoHeight * scale));
+      workCanvas.width = targetWidth;
+      workCanvas.height = targetHeight;
+      workCtx.drawImage(video, 0, 0, targetWidth, targetHeight);
+      const imageData = workCtx.getImageData(0, 0, targetWidth, targetHeight);
+      const mode = currentDetectMode();
+      preview.width = video.videoWidth;
+      preview.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, preview.width, preview.height);
+      if (mode === 'blue') {
+        const detection = detectBlueIntersections(
+          imageData,
+          targetWidth,
+          targetHeight,
+          5,
+          enableIntersect.checked
+        );
+        const fullIntersections = detection.points.map((point) => ({
+          x: point.x / scale,
+          y: point.y / scale
+        }));
+        const fullPerpHits = detection.perpendicularHits.map((point) => ({
+          x: point.x / scale,
+          y: point.y / scale
+        }));
+        const clusters = splitByNeighborGap(
+          fullIntersections,
+          parseInt(groupGap.value, 10)
+        );
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 210, 90, 0.9)';
+        for (let i = 0; i < clusters.a.length; i++) {
+          const x = clusters.a[i].x;
+          const y = clusters.a[i].y;
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255, 70, 70, 0.9)';
+        for (let i = 0; i < clusters.b.length; i++) {
+          const x = clusters.b[i].x;
+          const y = clusters.b[i].y;
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (enableIntersect.checked) {
+          ctx.fillStyle = 'rgba(255, 230, 0, 0.9)';
+          for (let i = 0; i < fullPerpHits.length; i++) {
+            const x = fullPerpHits[i].x;
+            const y = fullPerpHits[i].y;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+        statusEl.textContent = Detected ${fullIntersections.length} blue intersections, ${fullPerpHits.length} perpendicular hits;
+        squareCount.textContent = fullIntersections.length;
+        binaryColumns.textContent = '';
+        lastNCenters.length = 0;
+      } else {
+        const centers = detectGreenCenters(
+          imageData,
+          targetWidth,
+          targetHeight,
+          parseInt(minArea.value, 10)
+        );
+        const fullCenters = centers.map((center, idx) => ({
+          x: center.x / scale,
+          y: center.y / scale,
+          id: idx
+        }));
+        const clusters = clusterByNearest(
+          fullCenters,
+          parseInt(maxNeighbor.value, 10)
+        );
+        const arcClusters = clusters
+          .slice()
+          .sort((a, b) => b.length - a.length)
+          .slice(0, 2);
+        const arcFits = arcClusters.map((cluster) => ({
+          cluster,
+          fit: fitCircleKasa(cluster)
+        }));
+        const validFits = arcFits.filter((item) => item.fit);
+        let sharedCenter = null;
+        if (validFits.length === 2) {
+          const sortedFits = validFits.slice().sort((a, b) => a.fit.r - b.fit.r);
+          const small = sortedFits[0];
+          const large = sortedFits[1];
+          const candidate = {
+            cx: (small.fit.cx + large.fit.cx) / 2,
+            cy: (small.fit.cy + large.fit.cy) / 2
+          };
+          const smallMean = meanRadius(small.cluster, candidate.cx, candidate.cy);
+          if (Math.abs(smallMean - small.fit.r) > 30) {
+            sharedCenter = { cx: large.fit.cx, cy: large.fit.cy };
+          } else {
+            sharedCenter = candidate;
+          }
+        } else if (validFits.length === 1) {
+          sharedCenter = {
+            cx: validFits[0].fit.cx,
+            cy: validFits[0].fit.cy
+          };
+        }
+        if (sharedCenter) {
+          const windowSize = parseInt(centerWindow.value, 10);
+          if (windowSize > 1) {
+            lastNCenters.push({ cx: sharedCenter.cx, cy: sharedCenter.cy });
+            if (lastNCenters.length > windowSize) {
+              lastNCenters.splice(0, lastNCenters.length - windowSize);
+            }
+            if (lastNCenters.length === windowSize) {
+              let sumX = 0;
+              let sumY = 0;
+              for (let i = 0; i < lastNCenters.length; i++) {
+                sumX += lastNCenters[i].cx;
+                sumY += lastNCenters[i].cy;
+              }
+              sharedCenter = {
+                cx: sumX / windowSize,
+                cy: sumY / windowSize
+              };
+            }
+          } else {
+            lastNCenters.length = 0;
+          }
+        } else {
+          lastNCenters.length = 0;
+        }
+        const arcInfos = sharedCenter
+          ? arcFits.map((item) => {
+            if (!item.fit) return null;
+            const r = meanRadius(item.cluster, sharedCenter.cx, sharedCenter.cy);
+            const arc = findArcSpan(
+              item.cluster,
+              sharedCenter.cx,
+              sharedCenter.cy
+            );
+            let inferred = [];
+            if (arc) {
+              inferred = inferArcAnglesFromCommonSpacing(
+                item.cluster,
+                sharedCenter.cx,
+                sharedCenter.cy,
+                arc,
+                5
+              );
+              if (!inferred.length) {
+                inferred = inferArcAnglesFromDistance(
+                  item.cluster,
+                  sharedCenter.cx,
+                  sharedCenter.cy,
+                  arc,
+                  parseInt(maxNeighbor.value, 10)
+                );
+              }
+            }
+            return { cluster: item.cluster, arc, r, inferred };
+          }).filter(Boolean)
+          : [];
+        ctx.save();
+        const arcColors = [
+          'rgba(255, 0, 0, 0.85)',
+          'rgba(0, 170, 255, 0.85)',
+          'rgba(255, 150, 0, 0.85)',
+          'rgba(0, 200, 120, 0.85)'
+        ];
+        ctx.fillStyle = arcColors[0];
+        ctx.strokeStyle = arcColors[0];
+        ctx.lineWidth = 2;
+        fullCenters.forEach(center => {
+          const x = center.x;
+          const y = center.y;
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        arcClusters.forEach((cluster, idx) => {
+          if (cluster.length < 2) return;
+          const color = arcColors[idx % arcColors.length];
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(cluster[0].x, cluster[0].y);
+          for (let i = 1; i < cluster.length; i++) {
+            ctx.lineTo(cluster[i].x, cluster[i].y);
+          }
+          ctx.stroke();
+        });
+        arcClusters.forEach((cluster) => {
+          if (cluster.length < 2) return;
+          const pairSet = new Set();
+          const maxDist = parseInt(maxNeighbor.value, 10);
+          ctx.strokeStyle = 'rgba(0, 200, 0, 0.6)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+            for (let j = 0; j < cluster.length; j++) {
+              if (i === j) continue;
+              const dx = cluster[j].x - cluster[i].x;
+              const dy = cluster[j].y - cluster[i].y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestIdx = j;
+              }
+            }
+            if (nearestIdx === -1 || nearestDist > maxDist) continue;
+            const a = cluster[i].id;
+            const b = cluster[nearestIdx].id;
+            const key = a < b ? ${a}-${b} : ${b}-${a};
+            if (pairSet.has(key)) continue;
+            pairSet.add(key);
+            ctx.moveTo(cluster[i].x, cluster[i].y);
+            ctx.lineTo(cluster[nearestIdx].x, cluster[nearestIdx].y);
+          }
+          ctx.stroke();
+        });
+        arcInfos.forEach((info) => {
+          if (!sharedCenter) return;
+          const { cluster, arc, r, inferred } = info;
+          const cx = sharedCenter.cx;
+          const cy = sharedCenter.cy;
+          if (arc) {
+            ctx.strokeStyle = 'rgba(0, 120, 255, 0.6)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, arc.start, arc.end, true);
+            ctx.stroke();
+          }
+          if (cluster.length < 2) return;
+          if (arc) {
+            if (inferred.length) {
+              ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+              ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              for (let i = 0; i < inferred.length; i++) {
+                const angle = inferred[i];
+                const x = cx + r * Math.cos(angle);
+                const y = cy + r * Math.sin(angle);
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(x, y);
+              }
+              ctx.stroke();
+            }
+          }
+          ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cluster[i].x, cluster[i].y);
+          }
+          ctx.stroke();
+          const pairSet = new Set();
+          const maxDist = parseInt(maxNeighbor.value, 10);
+          ctx.strokeStyle = 'rgba(0, 120, 255, 0.7)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let i = 0; i < cluster.length; i++) {
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+            for (let j = 0; j < cluster.length; j++) {
+              if (i === j) continue;
+              const dx = cluster[j].x - cluster[i].x;
+              const dy = cluster[j].y - cluster[i].y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestIdx = j;
+              }
+            }
+            if (nearestIdx === -1 || nearestDist > maxDist) continue;
+            const a = cluster[i].id;
+            const b = cluster[nearestIdx].id;
+            const key = a < b ? ${a}-${b} : ${b}-${a};
+            if (pairSet.has(key)) continue;
+            pairSet.add(key);
+            const midX = (cluster[i].x + cluster[nearestIdx].x) / 2;
+            const midY = (cluster[i].y + cluster[nearestIdx].y) / 2;
+            ctx.moveTo(midX, midY);
+            ctx.lineTo(cx, cy);
+          }
+          ctx.stroke();
+        });
+        ctx.restore();
+        if (sharedCenter && arcInfos.length === 2) {
+          const sortedArcs = arcInfos.slice().sort((a, b) => a.r - b.r);
+          const inner = sortedArcs[0];
+          const outer = sortedArcs[1];
+          const angles = outer.inferred;
+          if (angles.length) {
+            const frameData = ctx.getImageData(0, 0, preview.width, preview.height);
+            const sectionCount = parseInt(sections.value, 10);
+            const columns = angles.map((angle) => {
+              const x1 = sharedCenter.cx + inner.r * Math.cos(angle);
+              const y1 = sharedCenter.cy + inner.r * Math.sin(angle);
+              const x2 = sharedCenter.cx + outer.r * Math.cos(angle);
+              const y2 = sharedCenter.cy + outer.r * Math.sin(angle);
+              return sampleLineBits(frameData, x1, y1, x2, y2, sectionCount);
+            });
+            binaryColumns.innerHTML = columns
+              .map((bits) => <div class="col">${bits.join(' ')}</div>)
+              .join('');
+          } else {
+            binaryColumns.textContent = '';
+          }
+        } else {
+          binaryColumns.textContent = '';
+        }
+        statusEl.textContent = Detected ${centers.length} green regions in ${arcClusters.length} arcs;
+        squareCount.textContent = centers.length;
+      }
+      animationId = requestAnimationFrame(processFrame);
+    }
+    startBtn.addEventListener('click', async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: buildVideoConstraints()
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+          statusEl.textContent = 'Running...';
+          processFrame();
+        };
+      } catch (err) {
+        alert('Error accessing camera: ' + err.message);
+      }
+    });
+    stopBtn.addEventListener('click', () => stopStream(true));
+    window.addEventListener('pagehide', () => stopStream(false));
+    window.addEventListener('beforeunload', () => stopStream(false));
+    minGreen.addEventListener('input', updateLabels);
+    delta.addEventListener('input', updateLabels);
+    minArea.addEventListener('input', updateLabels);
+    downscale.addEventListener('input', updateLabels);
+    maxNeighbor.addEventListener('input', updateLabels);
+    groupGap.addEventListener('input', updateLabels);
+    sections.addEventListener('input', updateLabels);
+    centerWindow.addEventListener('input', updateLabels);
+    detectModeInputs.forEach((input) => {
+      input.addEventListener('change', updateLabels);
+    });
+    toggleControls.addEventListener('click', () => {
+      controls.classList.toggle('collapsed');
+    });
+    updateLabels();
+  </script>
+</body>
+</html>The current code already:
+
+detects green blobs → treats them as points on (roughly) circular arcs
+fits circle(s) to find shared center + radius/radii
+infers a set of angular positions (inferred array in the code) — these are the candidate radial lines
+samples along each candidate radial line segment (from inner → outer radius)
+
+Your question is essentially:
+How do I figure out which of these candidate radial lines actually pass close enough to real green points (i.e. "intersect" with detected green blobs)?
+Here are the most practical ways to solve this, ordered from simplest → most robust.
+1. Quick & pragmatic solution — distance check (recommended first step)
+After you have the inferred angles for a particular arc, do this:
+JavaScript// inside the place where you already have sharedCenter, inner.r, outer.r, angles = outer.inferred
+
+const MAX_DIST_TO_LINE_PX = 6.5;   // ← tune this (usually 4–10 px)
+
+function pointToLineDistance(px, py, cx, cy, angle) {
+    // vector from center to point
+    const dx = px - cx;
+    const dy = py - cy;
+    const pointDist = Math.hypot(dx, dy);
+
+    // angle of the point
+    let pointAngle = Math.atan2(dy, dx);
+    if (pointAngle < 0) pointAngle += 2 * Math.PI;
+
+    // smallest angular difference
+    let dAngle = Math.abs(pointAngle - angle);
+    if (dAngle > Math.PI) dAngle = 2 * Math.PI - dAngle;
+
+    // chord distance ≈ r × |Δθ|   (small angle approximation is usually good enough)
+    return pointDist * dAngle;
+    // more exact version:
+    // return Math.abs(pointDist * Math.sin(dAngle));
+}
+
+function countIntersectionsPerRadialLine() {
+    const hits = new Array(angles.length).fill(0);
+    const usedPoints = new Set(); // optional — prevent double-counting
+
+    for (const pt of arcClusterPoints) {   // ← the green points of this arc
+        let bestIdx = -1;
+        let bestDist = Infinity;
+
+        for (let i = 0; i < angles.length; i++) {
+            const dist = pointToLineDistance(
+                pt.x, pt.y,
+                sharedCenter.cx, sharedCenter.cy,
+                angles[i]
+            );
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+            }
+        }
+
+        if (bestDist <= MAX_DIST_TO_LINE_PX) {
+            hits[bestIdx]++;
+            // usedPoints.add(pt.id);   // if you want 1-to-1 matching
+        }
+    }
+
+    return hits;  // array of how many green points "hit" each radial
+}
+Then you can:
+
+keep only radials where hits[i] >= 1 (or ≥ 2 if you want stricter)
+visualize them in different color
+show count next to each binary column
+
+2. Even simpler (but less accurate) — angular proximity
+JavaScriptconst MAX_ANGLE_DEG = 3.0;           // tune 1.5–5°
+const MAX_ANGLE_RAD = MAX_ANGLE_DEG * Math.PI / 180;
+
+for each green point:
+    let ptAngle = Math.atan2(pt.y - cy, pt.x - cx);
+    if (ptAngle < 0) ptAngle += 2*Math.PI;
+
+    for each candidate angle in inferred:
+        let d = Math.abs(ptAngle - angle);
+        if (d > Math.PI) d = 2*Math.PI - d;
+
+        if (d < MAX_ANGLE_RAD) {
+            // this radial line "hits" this point
+        }
+→ Very fast, but becomes less reliable when points are far from center (because same angle difference → larger physical distance at larger radius).
+3. Best quality — project point onto line segment + check closeness
+For highest quality (especially when arcs are not perfectly circular or center is slightly off):
+
+For each green point P
+For each candidate radial (defined by angle θ)
+direction vector dx = cos(θ), dy = sin(θ)
+project vector CP onto direction → t = dot(CP, direction)
+closest point on infinite line = C + t · direction
+clamp t between r_inner and r_outer → get closest point on segment
+compute euclidean distance(P, closest-on-segment)
+
+If distance ≤ threshold (e.g. 5–9 px) → count as intersection
+
+This is the most geometrically correct approach.
+Quick visualization addition
+Add this after you draw the radials:
+JavaScript// after drawing the radial lines
+ctx.save();
+ctx.strokeStyle = 'rgba(255,255,0,0.9)';
+ctx.lineWidth = 2.5;
+
+for (let i = 0; i < angles.length; i++) {
+    const hitCount = hits[i] || 0;
+    if (hitCount === 0) continue;
+
+    const angle = angles[i];
+    const x2 = cx + outerR * Math.cos(angle);
+    const y2 = cy + outerR * Math.sin(angle);
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    // optional label
+    const tx = cx + (outerR * 0.6) * Math.cos(angle);
+    const ty = cy + (outerR * 0.6) * Math.sin(angle);
+    ctx.fillStyle = 'yellow';
+    ctx.font = '11px Arial';
+    ctx.fillText(hitCount, tx, ty);
+}
+ctx.restore();
+Summary — most common path people take
+
+Use option 1 (chord distance = r × Δθ) — very good compromise
+Set MAX_DIST_TO_LINE_PX ≈ 5–8
+Only draw/sample radials that have ≥ 1 (or ≥ 2) hits
+(optional) sort radials by hit count or by angular order
+If too many/few hits → tune MAX_DIST_TO_LINE_PX + the inference step size
+
+Which approach sounds closest to what you want to achieve?
+Do you want strict 1 green point per radial, or just "at least one nearby point"?
+Do the green points lie very precisely on the radials already, or is there noticeable offset/noise?
+Let me know → I can give you a more targeted code snippet.3,8сБыстроExecuted codewhy does it fall apart when i try to use the ransac method to interpolate arcs between points?The most common reasons why RANSAC-based circle fitting falls apart (or gives wildly unstable/poor results) when you switch from your current least-squares-based arc fitting (fitCircleKasa) to RANSAC — especially on short/partial arcs of green blob centers — come down to a few well-known geometric and statistical properties of the circle-fitting problem.
+Here are the main culprits, ranked roughly by how frequently they destroy RANSAC performance in exactly this kind of application (sparse points along one or more arcs):
+
+Very small arc span (low angular coverage) → extremely ill-conditioned problem
+When your points only cover e.g. 30°–90° (or less) of the circle, there are many circles that almost perfectly pass near those points.
+→ Even tiny noise or small systematic bias in point positions creates huge variation in fitted center & radius.
+→ RANSAC keeps finding different plausible large-radius / far-away-center solutions in every run → the consensus never stabilizes.
+Your current algebraic (Kåsa / Taubin-style) least-squares method is also biased in this regime, but at least it converges to one (biased) answer. RANSAC often doesn't even reach weak consensus.
+RANSAC needs many more iterations than you expect on partial arcs
+The classic 3-point circle fit is used in most RANSAC circle implementations.
+Probability that a random triplet lies on the "true" circle ≈ (arc fraction)³
+→ If your arc is only ~1/6 of the circle (60°), you need ~ 6³ = 216× more samples than for full circles just to have a decent chance of hitting a good minimal set.
+→ With noise/outliers present, you usually need 5–50× even more iterations.
+If you kept the same maxIterations (or even 1000–5000) that works for full circles → RANSAC almost never sees a good model → it returns garbage or fails.
+Inlier threshold is extremely hard to tune on partial arcs
+The distance threshold (how close a point must be to count as inlier) must be:
+large enough to tolerate blob-center noise / quantization / lens distortion (~4–12 px usually)
+small enough to reject wrong-circle hypotheses
+On short arcs the geometric leverage is low → wrong large circles can still have most points within 10–20 px → they collect huge inlier counts → they win over the correct (smaller) circle.
+Bias toward very large / infinite-radius circles
+When three points are almost collinear (short arc + noise), the circumcircle becomes huge (or imaginary).
+RANSAC often ranks these degenerate/large-radius models very high because they accidentally keep many points "close enough" due to the flat curvature.
+Your point set is sparse and quasi-regular
+Green blobs are not dense edge pixels — they're centroids spaced roughly evenly along the arc.
+→ This actually makes the 3-point minimal solver less stable than on dense edge chains (where you can use more robust 4+ point scorers or MAGSAC-style methods).
+→ Regular spacing + short arc = many near-degenerate triplets.
+
+Quick comparison: why your current method "works" better here
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PropertyAlgebraic LS (Kåsa / your code)Geometric RANSAC circle fitHandles very short arcsPoor but at least converges to somethingUsually falls apart completelySensitivity to leverage/curvatureHigh bias, but stableExtremely high varianceNeeds many points?Yes, but degrades gracefullyNeeds either many points or many iterationsLarge-radius biasModerateVery strong (wins many contests)Tuning difficultyThresholds on green color + areaDistance thresh + iterations + degeneracy handling
+What usually fixes / improves RANSAC in this exact setting
+
+Strongly constrain the radius range
+Before/after minimal fit, reject models where radius is outside [r_min, r_max] (you probably already have a rough idea from blob spacing or previous frames).
+Use way more iterations
+For 60° arc → try 10,000–100,000 iterations (or adaptive like MLESAC/MAGSAC).
+Use a better inlier metric
+Instead of algebraic distance, use geometric distance to the circle.
+Switch to a 2-point + tangent/normal prior if you can estimate local direction at points (but hard with sparse blobs).
+Start with your current LS fit as initial guess, then refine with RANSAC or just use RANSAC only to remove gross outliers before final LS.
+Prefer M-estimators or MSAC / LMS instead of plain RANSAC (they down-weight outliers instead of hard reject).
+If arcs are very short (< ~50–60°) → pure RANSAC circle fit is usually not the right tool.
+Many papers explicitly say variants like yours (clustering → LS on arc) or Hough-like voting on gradient/center are more reliable than vanilla RANSAC for partial arcs.
+
+Bottom line:
+RANSAC circle fitting is great when you have ≥180° coverage or dense points + moderate noise.
+For the short, sparse, noisy-ish arcs typical in your green-blob detector — it very easily becomes unstable or biased toward nonsense large circles unless you add heavy constraints and crank up iterations dramatically.
+If you share roughly:
+
+typical arc angular span in degrees,
+number of green points per arc,
+noise level (how much do centers deviate from perfect circle in px),
+
+I can suggest more concrete parameter ranges or a hybrid approach that keeps the stability of your current code while adding some outlier rejection power.3,1сБыстроsourcesi want it to read the graycode here and ideally it would find the corresponding arcs' centers and be able to follow lines projecting outwards from the center that would give you the corresponding codeThe screenshot shows a classic absolute angular encoder style readout using reflected binary Gray code printed on concentric circular arcs (tracks). This is very common in optical rotary encoders, but here it's being imaged by a camera instead of dedicated sensors.
+The blue arc is almost certainly the highest-frequency track (least significant bit / finest resolution), with green dots marking detected centers/blobs along it. The red/orange dots are likely detections on one or more coarser (more significant bit) tracks.
+Your current code already does a good job finding green blob centers → clustering them → fitting shared circle center(s) → inferring regular angular steps → sampling radial lines between inner/outer radius.
+To read the Gray code value at the current angular position, you need to extend that logic to treat the concentric arcs as bit tracks and decode the radial "word" along each candidate spoke (radial line).
+Core idea how to read it
+
+You already have (or can robustly get):
+Center (cx, cy)
+Multiple radii → one per track: e.g. r_blue (LSB), r_next, r_coarser, … up to MSB
+
+For each inferred angular position θ (from your inferred array or from angular clustering of green points):
+Shoot a short radial segment around each expected track radius
+Classify each track crossing as 0 or 1 (black/gray vs white/reflective in your case)
+Collect the bits → form the Gray code number → convert to binary/decimal angle
+
+The final angular value is the decoded number × (360° / 2ⁿ), where n = number of bit tracks.
+
+Practical steps to add Gray code decoding to your code
+A. Improve center & radius estimation (critical for stable reading)
+Your current shared-center averaging is already good — keep the temporal smoothing (centerWindow).
+To get stable per-track radii:
+JavaScript// After you have arcClusters and sharedCenter
+
+const trackRadii = [];
+
+// For each arc cluster (inner to outer)
+arcClusters.forEach(cluster => {
+  if (cluster.length < 8) return; // too few points → unreliable
+  const meanR = meanRadius(cluster, sharedCenter.cx, sharedCenter.cy);
+  trackRadii.push(meanR);
+});
+
+trackRadii.sort((a,b)=>a-b); // inner → outer
+If you have only 2 arcs right now (blue + green), you might be missing coarser tracks — you may need to lower minGreen / delta temporarily or add another color/mode to detect darker tracks.
+B. Associate bits with tracks
+Assume you sort radii smallest to largest → bit 0 (LSB) = innermost (blue in your image), bit 1 = next, etc.
+In real Gray-code rotary encoders the LSB is usually the outermost track (highest spatial frequency), but your image seems to have blue as finest → so probably LSB = blue = outer.
+Test both orders — decode and see which one gives smooth angle change when you rotate slowly.
+C. Sample radial "bit" values (replace/extend your current sampleLineBits)
+Instead of fixed sections between inner/outer, sample near each track radius with a small window:
+JavaScriptfunction readGrayCodeAlongRadial(frameData, cx, cy, angle, trackRadii, bitSampleWidth = 9) {
+  const bits = [];
+  const twoPi = Math.PI * 2;
+  let normAngle = angle % twoPi;
+  if (normAngle < 0) normAngle += twoPi;
+
+  const cos = Math.cos(normAngle);
+  const sin = Math.sin(normAngle);
+
+  const data = frameData.data;
+  const w = frameData.width;
+  const h = frameData.height;
+
+  for (const r of trackRadii) {
+    // sample a small line segment centered at r
+    const half = bitSampleWidth >> 1;
+    let sumGreen = 0, count = 0;
+
+    for (let dr = -half; dr <= half; dr++) {
+      const cr = r + dr * 0.7; // sub-pixel-ish step
+      const px = Math.round(cx + cr * cos);
+      const py = Math.round(cy + cr * sin);
+
+      if (px < 0 || px >= w || py < 0 || py >= h) continue;
+
+      const idx = (py * w + px) * 4;
+      const g = data[idx + 1];
+      sumGreen += g;
+      count++;
+    }
+
+    if (count === 0) {
+      bits.push(0); // or skip / error
+      continue;
+    }
+
+    const avgG = sumGreen / count;
+    // Tune thresholds based on your lighting — you can even adaptive threshold per radial
+    bits.push(avgG > 100 ? 1 : 0); // example — white/reflective = 1, dark = 0 ?
+  }
+
+  return bits; // e.g. [1,0,1,1,0,…] — LSB first or MSB first
+}
+D. Gray → Binary conversion
+Standard reflected binary Gray code:
+JavaScriptfunction grayToBinary(grayBits) { // grayBits = array, index 0 = LSB
+  let binary = 0;
+  let prev = 0;
+  for (let i = grayBits.length - 1; i >= 0; i--) { // start from MSB
+    const b = grayBits[i] ^ prev;
+    binary = (binary << 1) | b;
+    prev = b;
+  }
+  return binary;
+}
+Or more compact JS version:
+JavaScriptfunction grayToBinaryFast(gray) {
+  let bin = gray;
+  while (gray > 0) {
+    gray >>= 1;
+    bin ^= gray;
+  }
+  return bin;
+}
+(If your bits are MSB-first array, reverse or adjust indexing.)
+E. Put it together in processFrame (green mode)
+After you have angles = outer.inferred (or better — angles coming from green point angular median clustering):
+JavaScriptif (sharedCenter && trackRadii.length >= 3 && angles.length > 0) { // need multiple tracks
+  const sectionCount = parseInt(sections.value, 10); // reuse or new slider "bits per radial"
+  
+  const readings = [];
+  angles.forEach(angle => {
+    const bits = readGrayCodeAlongRadial(
+      ctx.getImageData(0,0,preview.width,preview.height),
+      sharedCenter.cx, sharedCenter.cy,
+      angle,
+      trackRadii
+    );
+    
+    const pos = grayToBinary(bits); // or grayToBinaryFast(bitsToNumber(bits))
+    const angleDeg = (pos / (1 << bits.length)) * 360;
+    
+    readings.push({ angleRad: angle, angleDeg, rawPos: pos, bits });
+  });
+
+  // Show best / median / most confident reading
+  // e.g. sort by how many radials agree on same pos
+  // or just take median angleDeg
+  const medianDeg = median(readings.map(r => r.angleDeg));
+  
+  binaryColumns.innerHTML = readings.map(r => 
+    `<div class="col">
+       ${r.bits.join(' ')}<br>
+       pos ${r.rawPos} → ${r.angleDeg.toFixed(1)}°
+     </div>`
+  ).join('');
+
+  statusEl.textContent += ` | Decoded angle ≈ ${medianDeg?.toFixed(1)}°`;
+}
+Quick tuning tips
+
+Track detection: If you only see 1–2 arcs, try lowering minGreen to ~60–80 and/or delta to 20–30 to catch fainter tracks.
+Which is LSB? Rotate slowly by hand → see which decoding order gives smooth increasing/decreasing angle.
+Sampling robustness: Use median or majority vote over 5–11 pixels instead of average.
+Reject bad radials: If bits are ambiguous (e.g. avgG ≈ 90–110), skip that spoke.
+Number of bits: Count how many distinct radii you reliably get → that's your bit depth (4 bits → 16 positions, 8 bits → 256, 10–12 bits → 1024–4096 steps typical for such dials).
+
+If you can tell me roughly how many distinct arc colors/radii you see (or upload a clearer/larger image), or what total steps/resolution the dial should have (e.g. 360°, 1000 steps, 4096, etc.), I can refine the bit ordering and thresholds.
+This should get you from "dots on arcs" → actual angular position reading. Let me know what breaks first when you try it! 😄2,4сБыстроsourcesi want a slider specifically for the number of rows, which corresponds to the 2 ^ rows in terms of how many different bit combinations there areTo add a dedicated slider that controls the number of bit tracks (rows / concentric arcs) in your Gray code rotary encoder detector — and have the UI show the implied total number of unique positions as 2^rows — here's how to integrate it cleanly into your existing HTML + JavaScript.
+Step 1: Add the new slider to the HTML controls
+Insert this block inside the <div class="controls"> (e.g. after the "Sections" slider or near "Center avg window"):
+HTML<label>
+  Number of bit tracks (rows): <span id="bitRowsVal">6</span>
+  <input id="bitRows" type="range" min="3" max="12" value="6" step="1">
+  → 2<sup>n</sup> = <span id="totalPositionsVal">64</span> positions
+</label>
+
+min=3 and max=12 are reasonable defaults for most optical Gray-code dials (8–4096 steps).
+You can adjust the range later.
+
+Step 2: Add event listener + update function
+In your <script>, after the other input listeners:
+JavaScriptconst bitRows       = document.getElementById('bitRows');
+const bitRowsVal    = document.getElementById('bitRowsVal');
+const totalPositionsVal = document.getElementById('totalPositionsVal');
+
+function updateBitRowsLabel() {
+  const rows = parseInt(bitRows.value, 10);
+  bitRowsVal.textContent = rows;
+  const positions = 1 << rows;   // 2 ** rows
+  totalPositionsVal.textContent = positions.toLocaleString(); // nice formatting: 4096 → 4,096
+}
+
+bitRows.addEventListener('input', updateBitRowsLabel);
+Also call it once at the end of your script (after updateLabels();):
+JavaScriptupdateBitRowsLabel();
+Step 3: Use the value in your decoding logic
+Replace hard-coded assumptions about number of tracks with this value.
+In the part where you collect trackRadii (after clustering and fitting):
+JavaScript// Sort radii from inner → outer (or outer → inner — test which matches your dial)
+trackRadii.sort((a,b) => a - b);   // inner to outer
+
+// Limit to the number of bit tracks the user selected
+const desiredTracks = parseInt(bitRows.value, 10);
+if (trackRadii.length > desiredTracks) {
+  // Strategy A: take the most reliable / densest clusters
+  // (you already sorted arcClusters by length earlier — reuse if possible)
+  
+  // or Strategy B: just keep the first/last N after sorting
+  trackRadii = trackRadii.slice(0, desiredTracks); // inner N
+  // or slice(-desiredTracks) if you think outer tracks are more reliable
+}
+Even better — if you have more clusters than requested bits, you could show a warning:
+JavaScriptif (trackRadii.length < desiredTracks) {
+  statusEl.textContent += ` | Warning: only ${trackRadii.length} tracks found (wanted ${desiredTracks})`;
+}
+Step 4: Use it when reading / displaying the code
+In the decoding loop (where you call readGrayCodeAlongRadial):
+JavaScriptconst desiredRows = parseInt(bitRows.value, 10);
+
+// Only attempt decoding if we have roughly the expected number of tracks
+if (trackRadii.length >= desiredRows - 1) {  // allow ±1 missing
+  angles.forEach(angle => {
+    const bits = readGrayCodeAlongRadial(
+      ctx.getImageData(0,0,preview.width,preview.height),
+      sharedCenter.cx, sharedCenter.cy,
+      angle,
+      trackRadii.slice(0, desiredRows)   // enforce exactly n bits
+    );
+
+    if (bits.length === desiredRows) {
+      const pos = grayToBinary(bits);
+      const maxPos = (1 << desiredRows) - 1;
+      const angleDeg = (pos / maxPos) * 360;
+      // store/display pos, angleDeg, bits...
+    }
+  });
+}
+You can also show the expected bit count in the binary columns header or status:
+JavaScriptbinaryColumns.innerHTML = `<div style="font-weight:bold; margin-bottom:6px;">
+  Expected: ${desiredRows} bits → ${1 << desiredRows} positions
+</div>` + /* your existing columns */;
+Optional polish
+
+Auto-detect mode — add a checkbox "Auto-detect number of tracks" that overrides the slider when checked (counts unique mean radii within tolerance).
+Save/remember value — use localStorage so the slider stays where you left it:
+
+JavaScript// on input
+bitRows.addEventListener('input', () => {
+  updateBitRowsLabel();
+  localStorage.setItem('bitRows', bitRows.value);
+});
+
+// on load
+const saved = localStorage.getItem('bitRows');
+if (saved) {
+  bitRows.value = saved;
+  updateBitRowsLabel();
+}
+This gives you full control over how many bit rows the decoder should expect — which directly maps to the theoretical resolution (2^n discrete positions around the full 360°).
+Let me know if you want to decide which track is LSB/MSB based on the slider too, or if you need help sorting radii reliably when you have many candidates.1,9сБыстроExecuted codelsb msb?In optical absolute rotary encoders using reflected binary Gray code (the most common type for your setup), the bit order on the concentric tracks usually follows this convention:
+
+Outermost track = LSB (Least Significant Bit, bit 0)
+→ This is the finest-resolution / highest-frequency track (changes most often as the disk rotates).
+Innermost track = MSB (Most Significant Bit, bit n-1 for n-bit encoder)
+→ This changes least often (only every 180° or so for the highest bit).
+
+Why this is the typical arrangement
+
+The LSB needs the most precise divisions around the full 360° circle → it gets the longest / outermost arc length per bit transition → easiest to print/read optically without aliasing or resolution loss.
+MSB needs only 1 transition per revolution → shortest / innermost track is sufficient.
+This matches most commercial and DIY examples (e.g., Agilent/Avago encoders, Wikipedia diagrams of 3–4 bit Gray code wheels, many Arduino/Thingiverse printed encoders).
+
+In your screenshot:
+
+The blue arc (with many green detection dots) looks like the highest-frequency track → likely the LSB (outermost).
+Any fainter/darker/redder inner arcs would be progressively higher bits → MSB closest to center.
+
+How to confirm & implement in your code
+
+Visual check (easiest first test)
+Slowly rotate the dial by hand while watching the app.
+The track that flips value most frequently (every few degrees) → LSB (should be outer/blue in your image).
+The track that stays the same for long rotations → MSB (inner).
+
+Code adjustment
+Update your readGrayCodeAlongRadial or bit collection to reverse the order if needed.
+Two common options — pick based on your test:Option A: Assume outer = LSB (most common — try this first)JavaScript// After getting bits from trackRadii (sorted inner → outer)
+// bits[0] = inner = MSB
+// bits[bits.length-1] = outer = LSB
+
+const grayValue = bits.reduce((val, bit, idx) => {
+  return val | (bit << (bits.length - 1 - idx));  // MSB at high bit position
+}, 0);
+
+// Then grayToBinary(grayValue) as beforeOption B: Assume outer = MSB (less common, but some designs do it)JavaScript// bits[0] = inner = LSB
+// bits[bits.length-1] = outer = MSB
+
+const grayValue = bits.reduce((val, bit, idx) => {
+  return val | (bit << idx);  // LSB at low bit position
+}, 0);Then in your decoding:JavaScriptconst pos = grayToBinary(grayValue);
+const maxPos = (1 << bits.length) - 1;
+const angleDeg = (pos / maxPos) * 360;
+Add a toggle in UI for quick testing
+Add this to controls (near your new bitRows slider):HTML<label>
+  <input id="outerIsLsb" type="checkbox" checked>
+  Outermost track = LSB (usual for optical Gray encoders)
+</label>JavaScriptconst outerIsLsb = document.getElementById('outerIsLsb');
+
+// In decoding:
+let grayBitsOrdered;
+if (outerIsLsb.checked) {
+  grayBitsOrdered = bits.slice().reverse();  // make index 0 = LSB
+} else {
+  grayBitsOrdered = bits;
+}
+
+const pos = grayToBinary(grayBitsOrdered);  // your grayToBinary expects LSB first or adjustToggle it while rotating → see which setting gives smooth, monotonic angle increase (no big jumps except at wrap-around).
+
+If your dial is a standard commercial one (e.g., from a motor, robot arm, or instrument), outermost=LSB is ~90% likely. If it's a custom/printed one, check any markings or test as above.
+Let me know what you observe when rotating — does the blue (dense dots) change fastest? Or share if the angle jumps weirdly in one mode vs the other. We can nail it down from there!2сБыстроsourcesthe blue arcs are the boundaries all the black is the corresponding gray codeДостигнуто текущего лимитаЗарегистрируйся бесплатно, чтобы продолжить пользоваться Grok
