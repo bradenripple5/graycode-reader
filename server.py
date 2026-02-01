@@ -12,7 +12,14 @@ class HtmlIndexHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         self.send_header("Pragma", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         super().end_headers()
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.end_headers()
 
     def do_GET(self) -> None:
         if self.path == "/files":
@@ -155,6 +162,49 @@ class HtmlIndexHandler(SimpleHTTPRequestHandler):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(str(content), encoding="utf-8")
             _last_post = f"save {file_path}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "file": file_path}).encode("utf-8"))
+            return
+
+        if self.path == "/save-image":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                print("save-image: empty body")
+                self.send_error(400)
+                return
+            try:
+                raw_body = self.rfile.read(length).decode("utf-8")
+                print(f"save-image: raw body={raw_body!r}")
+                payload = json.loads(raw_body)
+            except Exception as exc:
+                print(f"save-image: parse error={exc!r}")
+                self.send_error(400)
+                return
+            file_path = str(payload.get("file", ""))
+            data_url = str(payload.get("dataUrl", ""))
+            if not file_path or not data_url:
+                self.send_error(400)
+                return
+            if Path(file_path).is_absolute() or ".." in Path(file_path).parts:
+                self.send_error(400)
+                return
+            prefix = "data:image/png;base64,"
+            if not data_url.startswith(prefix):
+                self.send_error(400)
+                return
+            import base64
+            try:
+                img_bytes = base64.b64decode(data_url[len(prefix):])
+            except Exception as exc:
+                print(f"save-image: decode error={exc!r}")
+                self.send_error(400)
+                return
+            dest = Path.cwd() / file_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(img_bytes)
+            _last_post = f"save-image {file_path}"
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()

@@ -10,14 +10,15 @@
       max-width: 1200px;
       margin: 0 auto;
       padding: 20px;
-      background: #f5f5f5;
+      background: #141414;
+      color: #f0f0f0;
     }
     h1 {
       text-align: center;
-      color: #333;
+      color: #f0f0f0;
     }
     .container {
-      background: white;
+      background: #1e1e1e;
       padding: 20px;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -25,8 +26,8 @@
     canvas {
       display: block;
       margin: 20px auto;
-      background: #eee;
-      border: 1px solid #ddd;
+      background: #1b1b1b;
+      border: 1px solid #333;
     }
     .controls {
       margin: 20px 0;
@@ -46,7 +47,7 @@
       background: #0056b3;
     }
     .info {
-      color: #666;
+      color: #b0b0b0;
       font-size: 14px;
       margin-top: 10px;
       text-align: center;
@@ -150,7 +151,7 @@
       const centerX = canvas.width / 2;
       const centerY = canvas.height / 2;
 
-      ctx.fillStyle = '#EEEEEE';
+      ctx.fillStyle = '#1b1b1b';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       if (showAngleWedges5) {
@@ -193,7 +194,7 @@
         const blueOuterStart = patternOuterRadius;
 
         if (blueInnerStart < gapRadius) {
-          ctx.fillStyle = '#00AA00';
+          ctx.fillStyle = '#0000FF';
           drawRing(ctx, centerX, centerY, blueInnerStart, gapRadius);
         }
         ctx.fillStyle = '#0000FF';
@@ -378,6 +379,29 @@
       return rings;
     }
 
+    function buildGraycodeBinaryOrderings(minBands, maxBands) {
+      const orderings = {};
+      for (let n = minBands; n <= maxBands; n++) {
+        const rings = generateRings(n, false, false);
+        const columnCount = rings.length > 0 ? rings[0].length : 0;
+        const digitList = [];
+        const digitDictionary = {};
+        for (let col = 0; col < columnCount; col++) {
+          let bits = '';
+          for (let ring = 0; ring < rings.length; ring++) {
+            bits += String(rings[ring][col] ?? 0);
+          }
+          digitDictionary[bits] = col;
+          digitList.push(bits);
+        }
+        orderings[n] = {
+          digit_dictionary: digitDictionary,
+          digit_list: digitList
+        };
+      }
+      return orderings;
+    }
+
     function ringsToColumns(rings) {
       const ringCount = rings.length;
       if (ringCount === 0) return [];
@@ -466,6 +490,8 @@
       const colsText = columns.map(col => col.join(',')).join('\n');
       rowsOutput.value = rowsText;
       colsOutput.value = colsText;
+
+      saveSettings();
     }
 
     let autoRotate = false;
@@ -486,6 +512,65 @@
       angleInput.value = String(displayAngle);
       renderFromControls();
       requestAnimationFrame(stepRotation);
+    }
+
+    const settingsKey = 'binary_radial_pattern_settings_v1';
+    let isInitializing = true;
+
+    function loadSettings() {
+      try {
+        const raw = localStorage.getItem(settingsKey);
+        if (!raw) return;
+        const settings = JSON.parse(raw);
+        const setIfPresent = (id, value) => {
+          const el = document.getElementById(id);
+          if (!el || value === undefined || value === null) return;
+          if (el.type === 'checkbox') {
+            el.checked = Boolean(value);
+          } else {
+            el.value = String(value);
+          }
+        };
+        setIfPresent('bandCount', settings.bandCount);
+        setIfPresent('circleSize', settings.circleSize);
+        setIfPresent('invertBits', settings.invertBits);
+        setIfPresent('reverseBits', settings.reverseBits);
+        setIfPresent('labelMode', settings.labelMode);
+        setIfPresent('showNumbers', settings.showNumbers);
+        setIfPresent('showGuides', settings.showGuides);
+        setIfPresent('showAngleGuides', settings.showAngleGuides);
+        setIfPresent('showAngleGuides5', settings.showAngleGuides5);
+        setIfPresent('showAngleWedges5', settings.showAngleWedges5);
+        setIfPresent('centerGap', settings.centerGap);
+        setIfPresent('angleOffset', settings.angleOffset);
+        setIfPresent('rotateSpeed', settings.rotateSpeed);
+      } catch (err) {
+        console.warn('Failed to load settings:', err);
+      }
+    }
+
+    function saveSettings() {
+      if (isInitializing) return;
+      const settings = {
+        bandCount: document.getElementById('bandCount').value,
+        circleSize: document.getElementById('circleSize').value,
+        invertBits: document.getElementById('invertBits').checked,
+        reverseBits: document.getElementById('reverseBits').checked,
+        labelMode: document.getElementById('labelMode').checked,
+        showNumbers: document.getElementById('showNumbers').checked,
+        showGuides: document.getElementById('showGuides').checked,
+        showAngleGuides: document.getElementById('showAngleGuides').checked,
+        showAngleGuides5: document.getElementById('showAngleGuides5').checked,
+        showAngleWedges5: document.getElementById('showAngleWedges5').checked,
+        centerGap: document.getElementById('centerGap').value,
+        angleOffset: document.getElementById('angleOffset').value,
+        rotateSpeed: document.getElementById('rotateSpeed').value
+      };
+      try {
+        localStorage.setItem(settingsKey, JSON.stringify(settings));
+      } catch (err) {
+        console.warn('Failed to save settings:', err);
+      }
     }
 
     document.getElementById('bandCount').addEventListener('input', renderFromControls);
@@ -511,7 +596,45 @@
         requestAnimationFrame(stepRotation);
       }
     });
-    window.onload = renderFromControls;
+    window.onload = () => {
+      loadSettings();
+      isInitializing = false;
+      renderFromControls();
+      const graycode_binary_orderings = buildGraycodeBinaryOrderings(4, 12);
+      for (let n = 4; n <= 12; n++) {
+        console.log(`graycode_binary_orderings[${n}]:`, graycode_binary_orderings[n]);
+      }
+    };
+
+    window.addEventListener('storage', (event) => {
+      if (event.key !== settingsKey || !event.newValue) return;
+      try {
+        const settings = JSON.parse(event.newValue);
+        if (settings.bandCount !== undefined) {
+          const bandInput = document.getElementById('bandCount');
+          bandInput.value = String(settings.bandCount);
+          renderFromControls();
+        }
+      } catch (err) {
+        console.warn('Failed to sync settings:', err);
+      }
+    });
+
+    setInterval(() => {
+      try {
+        const raw = localStorage.getItem(settingsKey);
+        if (!raw) return;
+        const settings = JSON.parse(raw);
+        const bandInput = document.getElementById('bandCount');
+        const desired = String(settings.bandCount ?? '');
+        if (desired && bandInput.value !== desired) {
+          bandInput.value = desired;
+          renderFromControls();
+        }
+      } catch (err) {
+        console.warn('Failed to poll settings:', err);
+      }
+    }, 500);
   </script>
 </body>
 </html>

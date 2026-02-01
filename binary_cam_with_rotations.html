@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binary Camera Window</title>
+    <style>
+        :root {
+            --bg: #151515;
+            --panel: #222;
+            --text: #f5f5f5;
+            --accent: #4caf50;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: monospace;
+        }
+
+        h1 {
+            margin: 0 0 16px 0;
+        }
+
+        .controls {
+            background: var(--panel);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            max-width: 900px;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input[type="range"],
+        select {
+            width: 100%;
+        }
+
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #1f1f1f;
+            color: var(--text);
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .button-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .button-row label {
+            margin: 0;
+        }
+
+        input[type="number"] {
+            width: 80px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #1f1f1f;
+            color: var(--text);
+        }
+
+        .layout {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            background: #111;
+            padding: 12px;
+            border-radius: 8px;
+            flex: 1 1 360px;
+        }
+
+        .panel-compact {
+            padding: 8px 12px;
+            flex: 0 0 auto;
+            align-self: flex-start;
+        }
+
+        .panel-compact h3 {
+            margin: 0 0 6px 0;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 12px;
+            margin: 0 0 12px 0;
+        }
+
+        .panel-title span {
+            margin-right: auto;
+        }
+
+        .output-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex: 1 1 360px;
+        }
+
+        #fullCanvas {
+            width: 100%;
+            height: auto;
+            background: #000;
+            border-radius: 4px;
+        }
+
+        #binaryOutput {
+            background: #000;
+            color: #8bc34a;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        #groupedOutput {
+            background: #000;
+            color: #ffd54f;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        #filteredOutput {
+            background: #000;
+            color: #ff7043;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre;
+            overflow: auto;
+            max-height: 70vh;
+        }
+
+        .value {
+            color: var(--accent);
+        }
+
+        #avgAngleOutput,
+        #avgAngleRotatedOutput {
+            display: inline-block;
+            min-height: 0;
+            padding: 4px 6px;
+            margin: 0;
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Binary Camera Window</h1>
+
+    <div class="controls">
+        <div class="control-group button-row">
+            <button id="startBtn">Start Camera</button>
+            <button id="stopBtn" disabled>Stop Camera</button>
+        </div>
+
+        <div class="control-group">
+            <label for="cameraSelect">Camera:</label>
+            <select id="cameraSelect"></select>
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Width: <span class="value" id="widthValue">200</span> px
+            </label>
+            <input type="range" id="windowWidth" min="10" max="240" value="240" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Height: <span class="value" id="heightValue">150</span> px
+            </label>
+            <input type="range" id="windowHeight" min="10" max="220" value="220" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Threshold: <span class="value" id="thresholdValue">128</span>
+            </label>
+            <input type="range" id="threshold" min="0" max="255" value="128" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Blue Low %: <span class="value" id="bgLowValue">10</span>%
+            </label>
+            <input type="range" id="bgLowPercent" min="0" max="50" value="10" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Blue High %: <span class="value" id="bgHighValue">90</span>%
+            </label>
+            <input type="range" id="bgHighPercent" min="50" max="100" value="90" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Rotate Readout: <span class="value" id="rotateReadoutValue">0</span>°
+            </label>
+            <input type="range" id="rotateReadout" min="-10" max="10" value="0" step="0.5">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Vertical Lines: <span class="value" id="linesValue">4</span>
+            </label>
+            <input type="range" id="lineCount" min="1" max="20" value="4" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Column Span: <span class="value" id="columnSpanValue">0</span>
+            </label>
+            <input type="range" id="columnSpan" min="0" max="30" value="0" step="1">
+        </div>
+
+        <div class="control-group">
+            <label for="bitGroupSize">No. of bits: <span class="value" id="bitGroupValue">8</span></label>
+            <input type="range" id="bitGroupSize" min="1" max="16" value="8" step="1">
+        </div>
+
+    </div>
+
+        <div class="layout">
+        <div class="panel">
+            <h3 class="panel-title">
+                <span>Camera View</span>
+                <button id="copyGroupedBtn">Save</button>
+            </h3>
+            <canvas id="fullCanvas"></canvas>
+        </div>
+        <div class="output-stack">
+            <div class="panel panel-compact">
+                <h3>Approx. Angle (Average)</h3>
+                <pre id="avgAngleOutput"></pre>
+                <pre id="avgAngleRotatedOutput"></pre>
+            </div>
+            <div class="panel">
+                <h3>Grouped Output (Rotated)</h3>
+                <pre id="groupedOutputRotated"></pre>
+            </div>
+            <div class="panel">
+                <h3>Grouped Output (No. of bits)</h3>
+                <pre id="groupedOutput"></pre>
+            </div>
+            <div class="panel">
+                <h3>Binary Output</h3>
+                <pre id="binaryOutput"></pre>
+            </div>
+            <div class="panel">
+                <h3>Filtered Output (Between Red Bands)</h3>
+                <pre id="filteredOutput"></pre>
+            </div>
+        </div>
+    </div>
+
+    <video id="video" autoplay playsinline style="display: none;"></video>
+
+    <script>
+        const video = document.getElementById('video');
+        const fullCanvas = document.getElementById('fullCanvas');
+        const fullCtx = fullCanvas.getContext('2d');
+        const output = document.getElementById('binaryOutput');
+        const groupedOutput = document.getElementById('groupedOutput');
+        const groupedOutputRotated = document.getElementById('groupedOutputRotated');
+        const filteredOutput = document.getElementById('filteredOutput');
+        const avgAngleOutput = document.getElementById('avgAngleOutput');
+        const avgAngleRotatedOutput = document.getElementById('avgAngleRotatedOutput');
+        const copyGroupedBtn = document.getElementById('copyGroupedBtn');
+        const saveEndpointBase = 'https://10.0.0.237:8000';
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const bitGroupSize = document.getElementById('bitGroupSize');
+        const bitGroupValue = document.getElementById('bitGroupValue');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const widthSlider = document.getElementById('windowWidth');
+        const heightSlider = document.getElementById('windowHeight');
+        const thresholdSlider = document.getElementById('threshold');
+        const bgLowPercentSlider = document.getElementById('bgLowPercent');
+        const bgHighPercentSlider = document.getElementById('bgHighPercent');
+        const lineCountSlider = document.getElementById('lineCount');
+        const widthValue = document.getElementById('widthValue');
+        const heightValue = document.getElementById('heightValue');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const bgLowValue = document.getElementById('bgLowValue');
+        const bgHighValue = document.getElementById('bgHighValue');
+        const linesValue = document.getElementById('linesValue');
+        const columnSpanSlider = document.getElementById('columnSpan');
+        const columnSpanValue = document.getElementById('columnSpanValue');
+        const rotateReadoutSlider = document.getElementById('rotateReadout');
+        const rotateReadoutValue = document.getElementById('rotateReadoutValue');
+
+        let stream = null;
+        let animationId = null;
+        let lineCount = 1;
+        const settingsKey = 'binary_cam_with_rotations_settings_v1';
+        let isInitializing = true;
+        let lastRoi = null;
+
+        function updateSliderLabels() {
+            widthValue.textContent = widthSlider.value;
+            heightValue.textContent = heightSlider.value;
+            thresholdValue.textContent = thresholdSlider.value;
+            bgLowValue.textContent = bgLowPercentSlider.value;
+            bgHighValue.textContent = bgHighPercentSlider.value;
+            rotateReadoutValue.textContent = rotateReadoutSlider.value;
+            bitGroupValue.textContent = bitGroupSize.value;
+            lineCount = 1;
+            lineCountSlider.value = '1';
+            linesValue.textContent = '1';
+            columnSpanValue.textContent = columnSpanSlider.value;
+            saveSettings();
+        }
+
+        function loadSettings() {
+            try {
+                const raw = localStorage.getItem(settingsKey);
+                if (!raw) return;
+                const settings = JSON.parse(raw);
+                const setIfPresent = (el, value) => {
+                    if (!el || value === undefined || value === null) return;
+                    if (el.type === 'checkbox') {
+                        el.checked = Boolean(value);
+                    } else {
+                        el.value = String(value);
+                    }
+                };
+                setIfPresent(bitGroupSize, settings.bitGroupSize);
+                setIfPresent(widthSlider, settings.windowWidth);
+                setIfPresent(heightSlider, settings.windowHeight);
+                setIfPresent(thresholdSlider, settings.threshold);
+                setIfPresent(bgLowPercentSlider, settings.bgLowPercent);
+                setIfPresent(bgHighPercentSlider, settings.bgHighPercent);
+                setIfPresent(rotateReadoutSlider, settings.rotateReadout);
+                setIfPresent(columnSpanSlider, settings.columnSpan);
+            } catch (err) {
+                console.warn('Failed to load settings:', err);
+            }
+        }
+
+        function saveSettings() {
+            if (isInitializing) return;
+            const settings = {
+                bitGroupSize: bitGroupSize.value,
+                windowWidth: widthSlider.value,
+                windowHeight: heightSlider.value,
+                threshold: thresholdSlider.value,
+                bgLowPercent: bgLowPercentSlider.value,
+                bgHighPercent: bgHighPercentSlider.value,
+                rotateReadout: rotateReadoutSlider.value,
+                columnSpan: columnSpanSlider.value
+            };
+            try {
+                localStorage.setItem(settingsKey, JSON.stringify(settings));
+            } catch (err) {
+                console.warn('Failed to save settings:', err);
+            }
+            try {
+                const radialRaw = localStorage.getItem('binary_radial_pattern_settings_v1');
+                const radialSettings = radialRaw ? JSON.parse(radialRaw) : {};
+                radialSettings.bandCount = String(bitGroupSize.value);
+                localStorage.setItem('binary_radial_pattern_settings_v1', JSON.stringify(radialSettings));
+            } catch (err) {
+                console.warn('Failed to sync radial band count:', err);
+            }
+        }
+
+        function grayCode(value) {
+            return value ^ (value >> 1);
+        }
+
+        function generateRings(sections, invert, reverse) {
+            const columns = 1 << sections;
+            const rings = Array.from({ length: sections }, () => []);
+            for (let col = 0; col < columns; col++) {
+                const code = grayCode(col);
+                for (let bit = 0; bit < sections; bit++) {
+                    const ringIdx = bit;
+                    const bitIdx = reverse ? bit : (sections - 1 - bit);
+                    let value = (code >> bitIdx) & 1;
+                    if (invert) value = value ^ 1;
+                    rings[ringIdx].push(value);
+                }
+            }
+            return rings;
+        }
+
+        function buildGraycodeBinaryOrderings(minBands, maxBands) {
+            const orderings = {};
+            for (let n = minBands; n <= maxBands; n++) {
+                const rings = generateRings(n, false, false);
+                const columnCount = rings.length > 0 ? rings[0].length : 0;
+                const digitList = [];
+                const digitDictionary = {};
+                for (let col = 0; col < columnCount; col++) {
+                    let bits = '';
+                    for (let ring = 0; ring < rings.length; ring++) {
+                        bits += String(rings[ring][col] ?? 0);
+                    }
+                    digitDictionary[bits] = col;
+                    digitList.push(bits);
+                }
+                orderings[n] = {
+                    digit_dictionary: digitDictionary,
+                    digit_list: digitList
+                };
+            }
+            return orderings;
+        }
+
+        function logBinaryBands(bandCount) {
+            const rings = generateRings(bandCount, false, false);
+            const columnCount = rings.length > 0 ? rings[0].length : 0;
+            console.log(`Gray code columns (${bandCount} bands):`);
+            for (let col = 0; col < columnCount; col++) {
+                let columnBits = '';
+                for (let ring = 0; ring < rings.length; ring++) {
+                    columnBits += String(rings[ring][col] ?? 0);
+                }
+                console.log(`Col ${col}: ${columnBits}`);
+            }
+        }
+
+        async function refreshCameras(requestPermission) {
+            if (requestPermission) {
+                await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } }
+                });
+            }
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(device => device.kind === 'videoinput');
+
+            cameraSelect.innerHTML = '';
+            cams.forEach((cam, index) => {
+                const option = document.createElement('option');
+                const label = cam.label || `Camera ${index + 1}`;
+                option.value = cam.deviceId;
+                option.textContent = label;
+                cameraSelect.appendChild(option);
+            });
+            selectPreferredCamera(cams);
+        }
+
+        function selectPreferredCamera(cams) {
+            const matchIndex = cams.findIndex((cam) => /back|rear|environment/i.test(cam.label || ''));
+            if (matchIndex >= 0) {
+                cameraSelect.selectedIndex = matchIndex;
+            }
+        }
+
+        function buildVideoConstraints(deviceId) {
+            if (deviceId) {
+                return { deviceId: { exact: deviceId } };
+            }
+            return { facingMode: { ideal: 'environment' } };
+        }
+
+        function clampWindowSize(maxWidth, maxHeight) {
+            const maxWidthAllowed = parseInt(widthSlider.max, 10);
+            const maxHeightAllowed = parseInt(heightSlider.max, 10);
+            widthSlider.max = String(Math.min(maxWidth, maxWidthAllowed));
+            heightSlider.max = String(Math.min(maxHeight, maxHeightAllowed));
+            widthSlider.value = Math.min(parseInt(widthSlider.value), parseInt(widthSlider.max, 10));
+            heightSlider.value = Math.min(parseInt(heightSlider.value), parseInt(heightSlider.max, 10));
+            updateSliderLabels();
+        }
+
+        function buildBinaryText(roiData, roiWidth, roiHeight, lineCount, linesOnly, yStart, yEnd) {
+            const stepX = 1;
+            const stepY = 1;
+            const threshold = parseInt(thresholdSlider.value, 10);
+            const low = 255 * (parseInt(bgLowPercentSlider.value, 10) / 100);
+            const high = 255 * (parseInt(bgHighPercentSlider.value, 10) / 100);
+
+            let text = '';
+            const lines = Math.max(1, lineCount);
+            const lineSpacing = roiWidth / (lines + 1);
+            const rowStart = Math.max(0, yStart ?? 0);
+            const rowEnd = Math.min(roiHeight, yEnd ?? roiHeight);
+
+            const isBluePixel = (r, g, b) => r < low && g < low && b > high;
+
+            if (linesOnly) {
+                for (let i = 1; i <= lines; i++) {
+                    const xLine = Math.floor(lineSpacing * i);
+                    for (let y = rowStart; y < rowEnd; y += stepY) {
+                        const offset = (y * roiWidth + xLine) * 4;
+                        const r = roiData[offset];
+                        const g = roiData[offset + 1];
+                        const b = roiData[offset + 2];
+                        const brightness = (r + g + b) / 3;
+                        if (isBluePixel(r, g, b)) {
+                            text += '2';
+                        } else {
+                            text += brightness > threshold ? '1' : '0';
+                        }
+                    }
+                    text += '\n';
+                }
+            } else {
+                for (let y = rowStart; y < rowEnd; y += stepY) {
+                    for (let x = 0; x < roiWidth; x += stepX) {
+                        const offset = (y * roiWidth + x) * 4;
+                        const r = roiData[offset];
+                        const g = roiData[offset + 1];
+                        const b = roiData[offset + 2];
+                        const brightness = (r + g + b) / 3;
+                        if (isBluePixel(r, g, b)) {
+                            text += '2';
+                        } else {
+                            text += brightness > threshold ? '1' : '0';
+                        }
+                    }
+                    text += '\n';
+                }
+            }
+            return text;
+        }
+
+        function groupBits(text, groupSize) {
+            const size = Math.max(1, parseInt(groupSize, 10) || 1);
+            if (size <= 1) {
+                return text;
+            }
+            const lines = text.split('\n');
+            const grouped = lines.map(line => {
+                if (!line) {
+                    return '';
+                }
+                const chunks = [];
+                for (let i = 0; i < line.length; i += size) {
+                    chunks.push(line.slice(i, i + size));
+                }
+                return chunks.join(' ');
+            });
+            return grouped.join('\n');
+        }
+
+        function majorityBitsByGroups(text, groupCount) {
+            const groups = Math.max(1, parseInt(groupCount, 10) || 1);
+            if (text.length < groups) {
+                return null;
+            }
+            const baseSize = Math.floor(text.length / groups);
+            const remainder = text.length % groups;
+            let index = 0;
+            let result = '';
+            for (let g = 0; g < groups; g++) {
+                const size = baseSize + (g < remainder ? 1 : 0);
+                const slice = text.slice(index, index + size);
+                index += size;
+                let ones = 0;
+                let zeros = 0;
+                for (let i = 0; i < slice.length; i++) {
+                    if (slice[i] === '1') {
+                        ones++;
+                    } else if (slice[i] === '0') {
+                        zeros++;
+                    }
+                }
+                result += ones >= zeros ? '1' : '0';
+            }
+            return result;
+        }
+
+        function columnBitsFromRows(rows, colIndex) {
+            let bits = '';
+            for (let r = 0; r < rows.length; r++) {
+                const ch = rows[r][colIndex];
+                if (ch !== undefined) {
+                    bits += ch;
+                }
+            }
+            return bits;
+        }
+
+        function clipUsingTwos(bitString) {
+            const first = bitString.indexOf('2');
+            const last = bitString.lastIndexOf('2');
+            let clipped = bitString;
+            if (first !== -1 && last !== -1 && last > first) {
+                clipped = bitString.slice(first + 1, last);
+            }
+            return clipped.replace(/2/g, '');
+        }
+
+        function buildGroupedColumnOutput(filteredText, groupSize, span) {
+            if (!filteredText || filteredText === 'No bands found') {
+                return { text: '', averageAngle: null };
+            }
+            const rows = filteredText.split('\n').filter(Boolean);
+            if (!rows.length) return { text: '', averageAngle: null };
+            const colCount = rows[0].length;
+            if (!colCount) return { text: '', averageAngle: null };
+
+            const center = Math.floor(colCount / 2);
+            const start = Math.max(0, center - span);
+            const end = Math.min(colCount - 1, center + span);
+            const lines = [];
+            const bitCount = Math.max(1, parseInt(groupSize, 10) || 1);
+            const scale = Math.pow(2, bitCount);
+            let angleSum = 0;
+            let angleCount = 0;
+            for (let c = start; c <= end; c++) {
+                const columnBits = columnBitsFromRows(rows, c);
+                const clipped = clipUsingTwos(columnBits);
+                const summarized = majorityBitsByGroups(clipped, groupSize);
+                const label = c - center;
+                if (!summarized) {
+                    const placeholder = 'X'.repeat(bitCount);
+                    lines.push(`col ${label >= 0 ? '+' : ''}${label}: ${placeholder} (X @ X°)`);
+                    continue;
+                }
+                const flipped = summarized.split('').reverse().join('');
+                const ordering = graycode_binary_orderings?.[bitCount]?.digit_dictionary || {};
+                const orderValue = ordering[flipped];
+                if (orderValue === undefined) {
+                    const placeholder = 'X'.repeat(bitCount);
+                    lines.push(`col ${label >= 0 ? '+' : ''}${label}: ${placeholder} (X @ X°)`);
+                    continue;
+                }
+                const angle = scale ? (360 * orderValue) / scale : 0;
+                angleSum += angle;
+                angleCount += 1;
+                lines.push(`col ${label >= 0 ? '+' : ''}${label}: ${summarized} (${orderValue} @ ${angle.toFixed(2)}°)`);
+            }
+            const averageAngle = angleCount ? angleSum / angleCount : null;
+            return { text: lines.join('\n'), averageAngle };
+        }
+
+
+        function processFrame() {
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            if (!videoWidth || !videoHeight) {
+                animationId = requestAnimationFrame(processFrame);
+                return;
+            }
+
+            const roiWidth = Math.min(parseInt(widthSlider.value, 10), videoWidth);
+            const roiHeight = Math.min(parseInt(heightSlider.value, 10), videoHeight);
+            const x = Math.floor((videoWidth - roiWidth) / 2);
+            const y = Math.floor((videoHeight - roiHeight) / 2);
+            lastRoi = { x, y, width: roiWidth, height: roiHeight };
+
+            fullCanvas.width = videoWidth;
+            fullCanvas.height = videoHeight;
+            fullCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+            const imageData = fullCtx.getImageData(x, y, roiWidth, roiHeight);
+
+            fullCtx.strokeStyle = '#ffeb3b';
+            fullCtx.lineWidth = 4;
+            fullCtx.strokeRect(x, y, roiWidth, roiHeight);
+            const lineSpacing = roiWidth / (lineCount + 1);
+            fullCtx.strokeStyle = '#4caf50';
+            fullCtx.lineWidth = 2;
+            for (let i = 1; i <= lineCount; i++) {
+                const xLine = Math.floor(x + lineSpacing * i);
+                fullCtx.beginPath();
+                fullCtx.moveTo(xLine, y);
+                fullCtx.lineTo(xLine, y + roiHeight);
+                fullCtx.stroke();
+            }
+
+            const binaryText = buildBinaryText(imageData.data, roiWidth, roiHeight, lineCount, false);
+            output.textContent = binaryText;
+            filteredOutput.textContent = binaryText;
+            const span = Math.max(0, parseInt(columnSpanSlider.value, 10) || 0);
+            const grouped = buildGroupedColumnOutput(binaryText, bitGroupSize.value, span);
+            groupedOutput.textContent = grouped.text;
+            avgAngleOutput.textContent = grouped.averageAngle === null
+                ? 'X'
+                : `${grouped.averageAngle.toFixed(2)}°`;
+
+            const rotateDegrees = parseFloat(rotateReadoutSlider.value) || 0;
+            if (Math.abs(rotateDegrees) > 0.001) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = roiWidth;
+                tempCanvas.height = roiHeight;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.save();
+                tempCtx.translate(roiWidth / 2 + 5, roiHeight / 2);
+                tempCtx.rotate((rotateDegrees * Math.PI) / 180);
+                tempCtx.drawImage(
+                    fullCanvas,
+                    x,
+                    y,
+                    roiWidth,
+                    roiHeight,
+                    -roiWidth / 2,
+                    -roiHeight / 2,
+                    roiWidth,
+                    roiHeight
+                );
+                tempCtx.restore();
+                const rotatedData = tempCtx.getImageData(0, 0, roiWidth, roiHeight);
+                const rotatedText = buildBinaryText(rotatedData.data, roiWidth, roiHeight, lineCount, false);
+                const groupedRotated = buildGroupedColumnOutput(rotatedText, bitGroupSize.value, span);
+                groupedOutputRotated.textContent = `rotated ${rotateDegrees.toFixed(1)}°\n${groupedRotated.text}`;
+                avgAngleRotatedOutput.textContent = groupedRotated.averageAngle === null
+                    ? 'X'
+                    : `rotated ${rotateDegrees.toFixed(1)}°: ${groupedRotated.averageAngle.toFixed(2)}°`;
+            } else {
+                groupedOutputRotated.textContent = 'rotated 0.0°\n' + grouped.text;
+                avgAngleRotatedOutput.textContent = 'rotated 0.0°: ' + (grouped.averageAngle === null
+                    ? 'X'
+                    : `${grouped.averageAngle.toFixed(2)}°`);
+            }
+
+            animationId = requestAnimationFrame(processFrame);
+        }
+
+        async function startCamera() {
+            try {
+                if (!cameraSelect.options.length) {
+                    await refreshCameras(true);
+                }
+                const deviceId = cameraSelect.value || undefined;
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: buildVideoConstraints(deviceId)
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    clampWindowSize(video.videoWidth, video.videoHeight);
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    processFrame();
+                };
+            } catch (err) {
+                alert('Error accessing camera: ' + err.message);
+            }
+        }
+
+        startBtn.addEventListener('click', startCamera);
+
+        function stopStream(resetUi) {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (video.srcObject) {
+                video.srcObject = null;
+            }
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            if (resetUi) {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                output.textContent = '';
+                groupedOutput.textContent = '';
+                filteredOutput.textContent = '';
+            }
+        }
+
+        stopBtn.addEventListener('click', () => {
+            stopStream(true);
+        });
+
+        cameraSelect.addEventListener('change', async () => {
+            if (!stream) {
+                return;
+            }
+            stopBtn.click();
+            startBtn.click();
+        });
+
+        window.addEventListener('pagehide', () => {
+            stopStream(false);
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopStream(false);
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                stopStream(false);
+            }
+        });
+
+        widthSlider.addEventListener('input', updateSliderLabels);
+        heightSlider.addEventListener('input', updateSliderLabels);
+        thresholdSlider.addEventListener('input', updateSliderLabels);
+        bgLowPercentSlider.addEventListener('input', updateSliderLabels);
+        bgHighPercentSlider.addEventListener('input', updateSliderLabels);
+        rotateReadoutSlider.addEventListener('input', updateSliderLabels);
+        lineCountSlider.addEventListener('input', updateSliderLabels);
+        columnSpanSlider.addEventListener('input', updateSliderLabels);
+        bitGroupSize.addEventListener('input', updateSliderLabels);
+
+        loadSettings();
+        isInitializing = false;
+        updateSliderLabels();
+        const graycode_binary_orderings = buildGraycodeBinaryOrderings(4, 12);
+        window.graycode_binary_orderings = graycode_binary_orderings;
+        for (let n = 4; n <= 12; n++) {
+            console.log(`graycode_binary_orderings[${n}]:`, graycode_binary_orderings[n]);
+        }
+        logBinaryBands(9);
+        refreshCameras(false).catch(() => {});
+        startCamera();
+
+        copyGroupedBtn.addEventListener('click', async () => {
+            const content = groupedOutput.textContent || '';
+            try {
+                const response = await fetch(`${saveEndpointBase}/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file: 'binary_output.txt', content })
+                });
+                if (!response.ok) {
+                    throw new Error(`Save failed (${response.status})`);
+                }
+                if (!lastRoi) {
+                    throw new Error('No ROI captured yet');
+                }
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = lastRoi.width;
+                tempCanvas.height = lastRoi.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(
+                    fullCanvas,
+                    lastRoi.x,
+                    lastRoi.y,
+                    lastRoi.width,
+                    lastRoi.height,
+                    0,
+                    0,
+                    lastRoi.width,
+                    lastRoi.height
+                );
+                const dataUrl = tempCanvas.toDataURL('image/png');
+                const imgResponse = await fetch(`${saveEndpointBase}/save-image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file: 'binary_output.png', dataUrl })
+                });
+                if (!imgResponse.ok) {
+                    throw new Error(`Image save failed (${imgResponse.status})`);
+                }
+            } catch (err) {
+                alert(`Failed to save: ${err.message}`);
+            }
+        });
+    </script>
+</body>
+</html>

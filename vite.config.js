@@ -7,8 +7,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     https: {
-      key: fs.readFileSync('./server.key'),
-      cert: fs.readFileSync('./server.crt'),
+      key: fs.readFileSync('./10.0.0.237-key.pem'),
+      cert: fs.readFileSync('./10.0.0.237.pem'),
     },
   },
 });

@@ -353,6 +353,7 @@
     let lastRayLines = [];
     let lastCenterFull = null;
     let lastArcRadius = null;
+    let lineLock = false;
 
     function updateLabels() {
       minGreenVal.textContent = minGreen.value;
@@ -989,6 +990,52 @@
       const bn = b / norm;
       const c = -(an * p1.x + bn * p1.y);
       return { a: an, b: bn, c };
+    }
+
+    function fitLineTLS(points) {
+      if (!points || points.length < 2) return null;
+      let meanX = 0;
+      let meanY = 0;
+      for (let i = 0; i < points.length; i++) {
+        meanX += points[i].x;
+        meanY += points[i].y;
+      }
+      meanX /= points.length;
+      meanY /= points.length;
+      let sxx = 0;
+      let sxy = 0;
+      let syy = 0;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - meanX;
+        const dy = points[i].y - meanY;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+      }
+      const denom = sxx - syy;
+      const theta = 0.5 * Math.atan2(2 * sxy, denom);
+      const dirX = Math.cos(theta);
+      const dirY = Math.sin(theta);
+      const a = dirY;
+      const b = -dirX;
+      const c = -(a * meanX + b * meanY);
+      return { a, b, c };
+    }
+
+    function nearestPointWithin(points, x, y, maxDist) {
+      const maxDistSq = maxDist * maxDist;
+      let best = null;
+      let bestD = maxDistSq;
+      for (let i = 0; i < points.length; i++) {
+        const dx = points[i].x - x;
+        const dy = points[i].y - y;
+        const d = dx * dx + dy * dy;
+        if (d <= bestD) {
+          bestD = d;
+          best = points[i];
+        }
+      }
+      return best;
     }
 
     function pointLineDist(line, p) {
@@ -2047,19 +2094,33 @@
       const mode = currentDetectMode();
       const redPoints = findRedPoints(imageData, targetWidth, targetHeight);
       const trackedLinePoints = [];
+      let trackedRayLines = null;
+      if (!enableLineTracking.checked) lineLock = false;
       if (enableLineTracking.checked && lastRayLines.length && redPoints.length) {
-        const maxPerLine = 10;
-        const distThresh = 2.5;
+        const samplesPerLine = 10;
+        const searchRadius = 6;
+        const minSamples = 4;
+        trackedRayLines = [];
         for (let i = 0; i < lastRayLines.length; i++) {
-          let found = 0;
-          for (let j = 0; j < redPoints.length; j++) {
-            if (pointLineDist(lastRayLines[i], redPoints[j]) <= distThresh) {
-              trackedLinePoints.push(redPoints[j]);
-              found += 1;
-              if (found >= maxPerLine) break;
+          const seg = lineSegmentInBounds(lastRayLines[i], targetWidth, targetHeight);
+          if (!seg) continue;
+          const linePoints = [];
+          for (let s = 0; s < samplesPerLine; s++) {
+            const t = samplesPerLine === 1 ? 0.5 : s / (samplesPerLine - 1);
+            const x = seg[0].x + (seg[1].x - seg[0].x) * t;
+            const y = seg[0].y + (seg[1].y - seg[0].y) * t;
+            const nearest = nearestPointWithin(redPoints, x, y, searchRadius);
+            if (nearest) {
+              linePoints.push(nearest);
+              trackedLinePoints.push(nearest);
             }
           }
+          if (linePoints.length >= minSamples) {
+            const newLine = fitLineTLS(linePoints);
+            if (newLine) trackedRayLines.push(newLine);
+          }
         }
+        if (!trackedRayLines.length) trackedRayLines = null;
       }
       const redCount = redPoints.length;
       redStats.frames += 1;
@@ -2078,7 +2139,65 @@
 
       let raysResult = null;
       let currentCenterFull = null;
-      if (redPoints.length) {
+      if (lineLock && trackedRayLines && trackedRayLines.length >= 2) {
+        const fullLines = trackedRayLines.map((line) => ({
+          a: line.a * scale,
+          b: line.b * scale,
+          c: line.c
+        }));
+        const inters = [];
+        for (let i = 0; i < fullLines.length; i++) {
+          for (let j = i + 1; j < fullLines.length; j++) {
+            const p = intersectLines(fullLines[i], fullLines[j]);
+            if (p) inters.push(p);
+          }
+        }
+        const centerFull = medianXY(inters);
+        const maxCenterDist = parseInt(centerFilterPx.value, 10);
+        const filtered = centerFull
+          ? fullLines.filter((line) => pointLineDist(line, centerFull) <= maxCenterDist)
+          : fullLines.slice();
+        lastRayLines = filtered.map((line) => ({
+          a: line.a / scale,
+          b: line.b / scale,
+          c: line.c
+        }));
+        if (centerFull) {
+          lastLineCenters.push({ x: centerFull.x, y: centerFull.y });
+          const maxCenters = 30;
+          if (lastLineCenters.length > maxCenters) {
+            lastLineCenters.splice(0, lastLineCenters.length - maxCenters);
+          }
+          let sumX = 0;
+          let sumY = 0;
+          for (let i = 0; i < lastLineCenters.length; i++) {
+            sumX += lastLineCenters[i].x;
+            sumY += lastLineCenters[i].y;
+          }
+          lastCenterFull = {
+            x: sumX / lastLineCenters.length,
+            y: sumY / lastLineCenters.length
+          };
+        }
+        ctx.save();
+        ctx.lineWidth = 2;
+        for (let i = 0; i < filtered.length; i++) {
+          const hue = (i * 37) % 360;
+          ctx.strokeStyle = `hsla(${hue}, 90%, 55%, 0.9)`;
+          const seg = lineSegmentInBounds(filtered[i], preview.width, preview.height);
+          if (!seg) continue;
+          ctx.beginPath();
+          ctx.moveTo(seg[0].x, seg[0].y);
+          ctx.lineTo(seg[1].x, seg[1].y);
+          ctx.stroke();
+        }
+        ctx.restore();
+        raysResult = {
+          center: centerFull ? { x: centerFull.x / scale, y: centerFull.y / scale } : null,
+          rays: []
+        };
+        currentCenterFull = centerFull || null;
+      } else if (!lineLock && redPoints.length) {
         raysResult = estimateCenterFromRays(redPoints, {
           maxLines: parseInt(radialMaxLines.value, 10),
           minInliers: parseInt(minRedGroup.value, 10)
@@ -2101,6 +2220,7 @@
           const filtered = centerFull
             ? fullLines.filter((line) => pointLineDist(line, centerFull) <= maxCenterDist)
             : fullLines.slice();
+          if (centerFull && filtered.length >= 4) lineLock = true;
           lastRayLines = filtered.map((line) => ({
             a: line.a / scale,
             b: line.b / scale,
