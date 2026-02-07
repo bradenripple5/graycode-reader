@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basic UPC Reader</title>
+    <style>
+        :root {
+            --bg: #151515;
+            --panel: #222;
+            --text: #f5f5f5;
+            --accent: #4caf50;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: monospace;
+        }
+
+        h1 {
+            margin: 0 0 16px 0;
+        }
+
+        .controls {
+            background: var(--panel);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            max-width: 900px;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        input[type="range"],
+        select {
+            width: 100%;
+        }
+
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #1f1f1f;
+            color: var(--text);
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .button-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .layout {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            background: #111;
+            padding: 12px;
+            border-radius: 8px;
+            flex: 1 1 360px;
+        }
+
+        #fullCanvas {
+            width: 100%;
+            height: auto;
+            background: #000;
+            border-radius: 4px;
+        }
+
+        .value {
+            color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <h1>Basic UPC Reader (Center Row)</h1>
+
+    <div class="controls">
+        <div class="control-group button-row">
+            <button id="startBtn">Start Camera</button>
+            <button id="stopBtn" disabled>Stop Camera</button>
+        </div>
+
+        <div class="control-group">
+            <label for="cameraSelect">Camera:</label>
+            <select id="cameraSelect"></select>
+        </div>
+
+        <div class="control-group">
+            <label for="resolutionSelect">Resolution:</label>
+            <select id="resolutionSelect"></select>
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Width: <span class="value" id="widthValue">240</span> px
+            </label>
+            <input type="range" id="windowWidth" min="10" max="1500" value="240" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Window Height: <span class="value" id="heightValue">220</span> px
+            </label>
+            <input type="range" id="windowHeight" min="10" max="1500" value="220" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Threshold: <span class="value" id="thresholdValue">128</span>
+            </label>
+            <input type="range" id="threshold" min="0" max="255" value="128" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Adaptive Threshold
+                <input type="checkbox" id="adaptiveThresholdToggle" checked>
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label>
+                Rows To Scan: <span class="value" id="rowsToScanValue">1</span>
+            </label>
+            <input type="range" id="rowsToScan" min="1" max="60" value="1" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Green Overlay Threshold: <span class="value" id="nonwhiteValue">200</span>
+            </label>
+            <input type="range" id="nonwhiteThreshold" min="0" max="255" value="200" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Min Rows: <span class="value" id="minRowsValue">6</span>
+            </label>
+            <input type="range" id="minRows" min="2" max="40" value="6" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Max Rows: <span class="value" id="maxRowsValue">40</span>
+            </label>
+            <input type="range" id="maxRows" min="2" max="80" value="40" step="1">
+        </div>
+
+        <div class="control-group">
+            <label>
+                Show Green Overlay
+                <input type="checkbox" id="showGreenOverlay" checked>
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label>
+                Video Resolution: <span class="value" id="resolutionValue">—</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="panel">
+            <h3>Camera View</h3>
+            <canvas id="fullCanvas"></canvas>
+        </div>
+        <div class="panel">
+            <h3>Center Row Pixels</h3>
+            <canvas id="centerRowCanvas"></canvas>
+            <button id="copyCenterRowRgbBtn">Copy RGB</button>
+        </div>
+        <div class="panel">
+            <h3>Center Row Bits</h3>
+            <pre id="centerRowOutput"></pre>
+            <button id="copyCenterRowBtn">Copy</button>
+        </div>
+        <div class="panel">
+            <h3>Compressed Bits</h3>
+            <pre id="compressedOutput"></pre>
+            <pre id="compressedUpcOutput"></pre>
+        </div>
+        <div class="panel">
+            <h3>Compressed Rows</h3>
+            <pre id="rowsCompressedOutput"></pre>
+        </div>
+        <div class="panel">
+            <h3>Row UPCs</h3>
+            <pre id="rowsUpcOutput"></pre>
+            <pre id="rowsUpcCommonOutput"></pre>
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top: 16px;">
+        <h3>Scan Still Image</h3>
+        <div class="control-group">
+            <label for="stillImageInput">Choose an image to scan:</label>
+            <input type="file" id="stillImageInput" accept="image/*">
+        </div>
+        <canvas id="stillScanCanvas"></canvas>
+    </div>
+
+    <video id="video" autoplay playsinline style="display: none;"></video>
+
+    <script>
+        const video = document.getElementById('video');
+        const fullCanvas = document.getElementById('fullCanvas');
+        const fullCtx = fullCanvas.getContext('2d');
+        const centerRowCanvas = document.getElementById('centerRowCanvas');
+        const centerRowCtx = centerRowCanvas.getContext('2d');
+        const copyCenterRowRgbBtn = document.getElementById('copyCenterRowRgbBtn');
+        const centerRowOutput = document.getElementById('centerRowOutput');
+        const copyCenterRowBtn = document.getElementById('copyCenterRowBtn');
+        const compressedOutput = document.getElementById('compressedOutput');
+        const compressedUpcOutput = document.getElementById('compressedUpcOutput');
+        const rowsCompressedOutput = document.getElementById('rowsCompressedOutput');
+        const rowsUpcOutput = document.getElementById('rowsUpcOutput');
+        const rowsUpcCommonOutput = document.getElementById('rowsUpcCommonOutput');
+        const stillImageInput = document.getElementById('stillImageInput');
+        const stillScanCanvas = document.getElementById('stillScanCanvas');
+        const stillScanCtx = stillScanCanvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const resolutionSelect = document.getElementById('resolutionSelect');
+        const widthSlider = document.getElementById('windowWidth');
+        const heightSlider = document.getElementById('windowHeight');
+        const thresholdSlider = document.getElementById('threshold');
+        const adaptiveThresholdToggle = document.getElementById('adaptiveThresholdToggle');
+        const widthValue = document.getElementById('widthValue');
+        const heightValue = document.getElementById('heightValue');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const rowsToScanSlider = document.getElementById('rowsToScan');
+        const rowsToScanValue = document.getElementById('rowsToScanValue');
+        const nonwhiteThresholdSlider = document.getElementById('nonwhiteThreshold');
+        const minRowsSlider = document.getElementById('minRows');
+        const maxRowsSlider = document.getElementById('maxRows');
+        const nonwhiteValue = document.getElementById('nonwhiteValue');
+        const minRowsValue = document.getElementById('minRowsValue');
+        const maxRowsValue = document.getElementById('maxRowsValue');
+        const showGreenOverlayToggle = document.getElementById('showGreenOverlay');
+        const resolutionValue = document.getElementById('resolutionValue');
+
+        let stream = null;
+        let animationId = null;
+        let lastRoiImage = null;
+
+        function updateSliderLabels() {
+            widthValue.textContent = widthSlider.value;
+            heightValue.textContent = heightSlider.value;
+            thresholdValue.textContent = thresholdSlider.value;
+            rowsToScanValue.textContent = rowsToScanSlider.value;
+            nonwhiteValue.textContent = nonwhiteThresholdSlider.value;
+            minRowsValue.textContent = minRowsSlider.value;
+            maxRowsValue.textContent = maxRowsSlider.value;
+        }
+
+        function updateSliderMaxToScreen() {
+            const screenMaxW = Math.max(10, Math.floor(window.innerWidth || screen.width || 1500));
+            const screenMaxH = Math.max(10, Math.floor(window.innerHeight || screen.height || 1500));
+            widthSlider.max = String(screenMaxW);
+            heightSlider.max = String(screenMaxH);
+            widthSlider.value = widthSlider.max;
+        }
+
+        async function refreshCameras(requestPermission) {
+            if (requestPermission) {
+                await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } }
+                });
+            }
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(device => device.kind === 'videoinput');
+
+            cameraSelect.innerHTML = '';
+            cams.forEach((cam, index) => {
+                const option = document.createElement('option');
+                const label = cam.label || `Camera ${index + 1}`;
+                option.value = cam.deviceId;
+                option.textContent = label;
+                cameraSelect.appendChild(option);
+            });
+            const matchIndex = cams.findIndex((cam) => /back|rear|environment/i.test(cam.label || ''));
+            if (matchIndex >= 0) {
+                cameraSelect.selectedIndex = matchIndex;
+            }
+        }
+
+        function buildVideoConstraints(deviceId) {
+            const selected = resolutionSelect.value || '';
+            const match = selected.match(/^(\\d+)x(\\d+)$/);
+            const base = {
+                width: { ideal: 3840 },
+                height: { ideal: 2160 },
+                frameRate: { ideal: 30, max: 60 }
+            };
+            if (match) {
+                base.width = { exact: parseInt(match[1], 10) };
+                base.height = { exact: parseInt(match[2], 10) };
+            }
+            if (deviceId) {
+                return { deviceId: { exact: deviceId }, ...base };
+            }
+            return { facingMode: { ideal: 'environment' }, ...base };
+        }
+
+        function clampWindowSize(maxWidth, maxHeight) {
+            const maxWidthAllowed = parseInt(widthSlider.max, 10);
+            const maxHeightAllowed = parseInt(heightSlider.max, 10);
+            widthSlider.max = String(Math.min(maxWidth, maxWidthAllowed));
+            heightSlider.max = String(Math.min(maxHeight, maxHeightAllowed));
+            widthSlider.value = Math.min(parseInt(widthSlider.value), parseInt(widthSlider.max, 10));
+            heightSlider.value = Math.min(parseInt(heightSlider.value), parseInt(heightSlider.max, 10));
+            updateSliderLabels();
+        }
+
+        const L_CODES = {
+            '0001101': '0',
+            '0011001': '1',
+            '0010011': '2',
+            '0111101': '3',
+            '0100011': '4',
+            '0110001': '5',
+            '0101111': '6',
+            '0111011': '7',
+            '0110111': '8',
+            '0001011': '9'
+        };
+        const R_CODES = {
+            '1110010': '0',
+            '1100110': '1',
+            '1101100': '2',
+            '1000010': '3',
+            '1011100': '4',
+            '1001110': '5',
+            '1010000': '6',
+            '1000100': '7',
+            '1001000': '8',
+            '1110100': '9'
+        };
+
+        function decodeUpcFromModules(bits) {
+            if (bits.length !== 95) return null;
+            const start = bits.slice(0, 3).join('');
+            const middle = bits.slice(45, 50).join('');
+            const end = bits.slice(92, 95).join('');
+            if (start !== '101' || middle !== '01010' || end !== '101') return null;
+
+            let digits = '';
+            for (let i = 0; i < 6; i++) {
+                const seg = bits.slice(3 + i * 7, 3 + (i + 1) * 7).join('');
+                const d = L_CODES[seg];
+                if (d === undefined) return null;
+                digits += d;
+            }
+            for (let i = 0; i < 6; i++) {
+                const seg = bits.slice(50 + i * 7, 50 + (i + 1) * 7).join('');
+                const d = R_CODES[seg];
+                if (d === undefined) return null;
+                digits += d;
+            }
+
+            const nums = digits.split('').map(n => parseInt(n, 10));
+            const oddSum = nums[0] + nums[2] + nums[4] + nums[6] + nums[8] + nums[10];
+            const evenSum = nums[1] + nums[3] + nums[5] + nums[7] + nums[9] + nums[11];
+            const checksum = (oddSum * 3 + evenSum) % 10;
+            if (checksum !== 0) return null;
+            return digits;
+        }
+
+        function getRowBitsAtY(imageData, width, y) {
+            const base = y * width * 4;
+            const globalThreshold = parseInt(thresholdSlider.value, 10);
+            let threshold = globalThreshold;
+            if (adaptiveThresholdToggle.checked) {
+                let sum = 0;
+                for (let x = 0; x < width; x++) {
+                    const i = base + x * 4;
+                    sum += imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+                }
+                const mean = sum / width;
+                threshold = Math.max(0, Math.min(255, mean + (globalThreshold - 128)));
+            }
+            const bits = [];
+            for (let x = 0; x < width; x++) {
+                const i = base + x * 4;
+                const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+                bits.push(g < threshold ? 1 : 0);
+            }
+            return bits;
+        }
+
+        function decodeRowBits(bits) {
+            const bitString = bits.join('');
+            const compressed = compressBits(bitString);
+            const decoded = decodeUpcFromBitString(compressed);
+            if (!decoded) return null;
+
+            const startIdx = compressed.indexOf('101');
+            const xStart = startIdx >= 0 ? startIdx : 0;
+            const xEnd = xStart + 95;
+            return { value: decoded, xStart, xEnd };
+        }
+
+        function buildCompressedRowsText(imageData, width, height) {
+            const centerY = Math.floor(height / 2);
+            const rowsToScan = Math.max(1, parseInt(rowsToScanSlider.value, 10));
+            const half = Math.floor(rowsToScan / 2);
+            const yStart = Math.max(0, centerY - half);
+            const yEnd = Math.min(height - 1, centerY + half);
+
+            const lines = [];
+            for (let y = yStart; y <= yEnd; y++) {
+                const bits = getRowBitsAtY(imageData, width, y);
+                const compressed = compressBits(bits.join(''));
+                lines.push(compressed);
+            }
+            return lines.join('\n');
+        }
+
+        function buildRowUpcsText(imageData, width, height) {
+            const centerY = Math.floor(height / 2);
+            const rowsToScan = Math.max(1, parseInt(rowsToScanSlider.value, 10));
+            const half = Math.floor(rowsToScan / 2);
+            const yStart = Math.max(0, centerY - half);
+            const yEnd = Math.min(height - 1, centerY + half);
+
+            const lines = [];
+            const counts = new Map();
+            for (let y = yStart; y <= yEnd; y++) {
+                const bits = getRowBitsAtY(imageData, width, y);
+                const decoded = decodeRowBits(bits);
+                const value = decoded ? decoded.value : '—';
+                lines.push(`${value}`);
+                if (decoded) {
+                    counts.set(value, (counts.get(value) || 0) + 1);
+                }
+            }
+
+            let bestValue = null;
+            let bestCount = 0;
+            for (const [value, count] of counts.entries()) {
+                if (count > bestCount) {
+                    bestCount = count;
+                    bestValue = value;
+                }
+            }
+
+            const summary = bestValue ? `Most common: ${bestValue} (${bestCount}/${rowsToScan})` : 'Most common: —';
+            return { lines: lines.join('\n'), summary };
+        }
+
+        function detectBarcodeRow(imageData, width, height) {
+            const centerY = Math.floor(height / 2);
+            const rowsToScan = Math.max(1, parseInt(rowsToScanSlider.value, 10));
+            const half = Math.floor(rowsToScan / 2);
+            const yStart = Math.max(0, centerY - half);
+            const yEnd = Math.min(height - 1, centerY + half);
+
+            const hits = new Map();
+            let best = null;
+            for (let y = yStart; y <= yEnd; y++) {
+                const bits = getRowBitsAtY(imageData, width, y);
+                const decoded = decodeRowBits(bits);
+                if (decoded) {
+                    const key = decoded.value;
+                    const count = (hits.get(key) || 0) + 1;
+                    hits.set(key, count);
+                    if (!best || count > best.count) {
+                        best = { ...decoded, y, count };
+                    }
+                }
+            }
+            return best ? { value: best.value, xStart: best.xStart, xEnd: best.xEnd, y: best.y } : null;
+        }
+
+        function buildCenterRowBits(imageData, width, height) {
+            const y = Math.floor(height / 2);
+            const threshold = parseInt(thresholdSlider.value, 10);
+            const base = y * width * 4;
+            let text = '';
+            for (let x = 0; x < width; x++) {
+                const i = base + x * 4;
+                const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+                text += g < threshold ? '1' : '0';
+            }
+            return text;
+        }
+
+        function buildCenterRowRgb(imageData, width, height) {
+            const y = Math.floor(height / 2);
+            const base = y * width * 4;
+            const parts = new Array(width);
+            for (let x = 0; x < width; x++) {
+                const i = base + x * 4;
+                parts[x] = `${imageData[i]},${imageData[i + 1]},${imageData[i + 2]}`;
+            }
+            return parts.join(' ');
+        }
+
+        function drawNonwhiteMatches(imageData, width, height, offsetX, offsetY, targetCtx = fullCtx) {
+            const nonwhiteThreshold = parseInt(nonwhiteThresholdSlider.value, 10);
+            const minRows = parseInt(minRowsSlider.value, 10);
+            const maxRows = parseInt(maxRowsSlider.value, 10);
+            const overlay = targetCtx.createImageData(width, height);
+            const src = imageData.data;
+            const dst = overlay.data;
+            for (let x = 0; x < width; x++) {
+                let runStart = -1;
+                let runLength = 0;
+                for (let y = 0; y < height; y++) {
+                    const i = (y * width + x) * 4;
+                    const g = src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114;
+                    if (g <= nonwhiteThreshold) {
+                        if (runLength === 0) {
+                            runStart = y;
+                        }
+                        runLength++;
+                    } else {
+                        if (runLength >= minRows && runLength <= maxRows) {
+                            for (let yy = runStart; yy < runStart + runLength; yy++) {
+                                const k = (yy * width + x) * 4;
+                                dst[k] = 0;
+                                dst[k + 1] = 255;
+                                dst[k + 2] = 0;
+                                dst[k + 3] = 120;
+                            }
+                        }
+                        runLength = 0;
+                        runStart = -1;
+                    }
+                }
+                if (runLength >= minRows && runLength <= maxRows) {
+                    for (let yy = runStart; yy < runStart + runLength; yy++) {
+                        const k = (yy * width + x) * 4;
+                        dst[k] = 0;
+                        dst[k + 1] = 255;
+                        dst[k + 2] = 0;
+                        dst[k + 3] = 120;
+                    }
+                }
+            }
+            targetCtx.putImageData(overlay, offsetX, offsetY);
+        }
+
+        function compressBits(bits) {
+            if (!bits) return '';
+            const runs = [];
+            let current = bits[0];
+            let len = 1;
+            for (let i = 1; i < bits.length; i++) {
+                if (bits[i] === current) {
+                    len++;
+                } else {
+                    runs.push({ bit: current, len });
+                    current = bits[i];
+                    len = 1;
+                }
+            }
+            runs.push({ bit: current, len });
+
+            const zeroRuns = runs.filter(r => r.bit === '0').map(r => r.len);
+            if (!zeroRuns.length) return bits;
+            const minZero = Math.max(1, Math.min(...zeroRuns));
+
+            let compressed = '';
+            for (const run of runs) {
+                const count = Math.max(1, Math.round(run.len / minZero));
+                compressed += run.bit.repeat(count);
+            }
+            return compressed;
+        }
+
+        function decodeUpcFromBitString(bitString) {
+            if (!bitString) return null;
+            for (let i = 0; i + 95 <= bitString.length; i++) {
+                const window = bitString.slice(i, i + 95);
+                const decoded = decodeUpcFromModules(window.split(''));
+                if (decoded) {
+                    return decoded;
+                }
+            }
+            return null;
+        }
+
+        function processFrame() {
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            if (!videoWidth || !videoHeight) {
+                animationId = requestAnimationFrame(processFrame);
+                return;
+            }
+
+            const roiWidth = Math.min(parseInt(widthSlider.value, 10), videoWidth);
+            const roiHeight = Math.min(parseInt(heightSlider.value, 10), videoHeight);
+            const x = Math.floor((videoWidth - roiWidth) / 2);
+            const y = Math.floor((videoHeight - roiHeight) / 2);
+
+            fullCanvas.width = videoWidth;
+            fullCanvas.height = videoHeight;
+            fullCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+            const imageData = fullCtx.getImageData(x, y, roiWidth, roiHeight);
+            lastRoiImage = { data: imageData.data, width: roiWidth, height: roiHeight };
+
+            fullCtx.strokeStyle = '#ffeb3b';
+            fullCtx.lineWidth = 2;
+            fullCtx.strokeRect(x, y, roiWidth, roiHeight);
+
+            if (showGreenOverlayToggle.checked) {
+                drawNonwhiteMatches(imageData, roiWidth, roiHeight, x, y);
+            }
+
+            const centerY = Math.floor(roiHeight / 2);
+            const rowData = fullCtx.getImageData(x, y + centerY, roiWidth, 1);
+            centerRowCanvas.width = roiWidth;
+            centerRowCanvas.height = 20;
+            centerRowCtx.putImageData(rowData, 0, 0);
+            centerRowCtx.imageSmoothingEnabled = false;
+            centerRowCtx.drawImage(centerRowCanvas, 0, 0, roiWidth, 1, 0, 0, roiWidth, 20);
+
+            const rowBits = buildCenterRowBits(imageData.data, roiWidth, roiHeight);
+            centerRowOutput.textContent = rowBits;
+            compressedOutput.textContent = compressBits(rowBits);
+            const compressedUpc = decodeUpcFromBitString(compressedOutput.textContent);
+            compressedUpcOutput.textContent = compressedUpc ? `UPC: ${compressedUpc}` : 'UPC: —';
+            rowsCompressedOutput.textContent = buildCompressedRowsText(imageData.data, roiWidth, roiHeight);
+            const rowsUpc = buildRowUpcsText(imageData.data, roiWidth, roiHeight);
+            rowsUpcOutput.textContent = rowsUpc.lines;
+            rowsUpcCommonOutput.textContent = rowsUpc.summary;
+
+            const barcode = detectBarcodeRow(imageData.data, roiWidth, roiHeight);
+            if (barcode) {
+                fullCtx.strokeStyle = '#4caf50';
+                fullCtx.lineWidth = 2;
+                const rectW = Math.max(1, barcode.xEnd - barcode.xStart);
+                fullCtx.strokeRect(x + barcode.xStart, y + barcode.y - 20, rectW, 40);
+                fullCtx.fillStyle = '#4caf50';
+                fullCtx.font = '16px monospace';
+                fullCtx.fillText(barcode.value, x + barcode.xStart, Math.max(16, y + barcode.y - 24));
+            }
+
+            animationId = requestAnimationFrame(processFrame);
+        }
+
+        async function startCamera() {
+            try {
+                if (!cameraSelect.options.length) {
+                    await refreshCameras(true);
+                }
+                if (!resolutionSelect.options.length) {
+                    populateResolutions();
+                }
+                const deviceId = cameraSelect.value || undefined;
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: buildVideoConstraints(deviceId)
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    clampWindowSize(video.videoWidth, video.videoHeight);
+                    resolutionValue.textContent = `${video.videoWidth} x ${video.videoHeight}`;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    processFrame();
+                };
+            } catch (err) {
+                alert('Error accessing camera: ' + err.message);
+            }
+        }
+
+        function populateResolutions() {
+            const candidates = [
+                [4096, 2160],
+                [3840, 2160],
+                [2560, 1440],
+                [1920, 1080],
+                [1280, 720],
+                [640, 480]
+            ];
+            resolutionSelect.innerHTML = '';
+            candidates.forEach(([w, h]) => {
+                const option = document.createElement('option');
+                option.value = `${w}x${h}`;
+                option.textContent = `${w} x ${h}`;
+                resolutionSelect.appendChild(option);
+            });
+            resolutionSelect.value = '3840x2160';
+        }
+
+        function stopStream(resetUi) {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (video.srcObject) {
+                video.srcObject = null;
+            }
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            if (resetUi) {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        }
+
+        startBtn.addEventListener('click', startCamera);
+        stopBtn.addEventListener('click', () => stopStream(true));
+
+        cameraSelect.addEventListener('change', async () => {
+            if (!stream) return;
+            stopBtn.click();
+            startBtn.click();
+        });
+
+        resolutionSelect.addEventListener('change', async () => {
+            if (!stream) return;
+            stopBtn.click();
+            startBtn.click();
+        });
+
+        window.addEventListener('pagehide', () => stopStream(false));
+        window.addEventListener('beforeunload', () => stopStream(false));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') stopStream(false);
+        });
+
+        widthSlider.addEventListener('input', updateSliderLabels);
+        heightSlider.addEventListener('input', updateSliderLabels);
+        thresholdSlider.addEventListener('input', updateSliderLabels);
+        rowsToScanSlider.addEventListener('input', updateSliderLabels);
+        nonwhiteThresholdSlider.addEventListener('input', updateSliderLabels);
+        minRowsSlider.addEventListener('input', updateSliderLabels);
+        maxRowsSlider.addEventListener('input', updateSliderLabels);
+
+        copyCenterRowBtn.addEventListener('click', async () => {
+            const text = centerRowOutput.textContent || '';
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch (err) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+            }
+        });
+
+        copyCenterRowRgbBtn.addEventListener('click', async () => {
+            if (!lastRoiImage) return;
+            const text = buildCenterRowRgb(lastRoiImage.data, lastRoiImage.width, lastRoiImage.height);
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch (err) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+            }
+        });
+
+        stillImageInput.addEventListener('change', () => {
+            const file = stillImageInput.files && stillImageInput.files[0];
+            if (!file) return;
+            stopStream(true);
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                stillScanCanvas.width = img.naturalWidth || img.width;
+                stillScanCanvas.height = img.naturalHeight || img.height;
+                stillScanCtx.drawImage(img, 0, 0, stillScanCanvas.width, stillScanCanvas.height);
+                const imageData = stillScanCtx.getImageData(0, 0, stillScanCanvas.width, stillScanCanvas.height);
+                drawNonwhiteMatches(imageData, stillScanCanvas.width, stillScanCanvas.height, 0, 0, stillScanCtx);
+
+                const rowBits = buildCenterRowBits(imageData.data, stillScanCanvas.width, stillScanCanvas.height);
+                centerRowOutput.textContent = rowBits;
+                compressedOutput.textContent = compressBits(rowBits);
+                const compressedUpc = decodeUpcFromBitString(compressedOutput.textContent);
+                compressedUpcOutput.textContent = compressedUpc ? `UPC: ${compressedUpc}` : 'UPC: —';
+                rowsCompressedOutput.textContent = buildCompressedRowsText(imageData.data, stillScanCanvas.width, stillScanCanvas.height);
+                const rowsUpc = buildRowUpcsText(imageData.data, stillScanCanvas.width, stillScanCanvas.height);
+                rowsUpcOutput.textContent = rowsUpc.lines;
+                rowsUpcCommonOutput.textContent = rowsUpc.summary;
+
+                const barcode = detectBarcodeRow(imageData.data, stillScanCanvas.width, stillScanCanvas.height);
+                if (barcode) {
+                    stillScanCtx.strokeStyle = '#4caf50';
+                    stillScanCtx.lineWidth = 2;
+                    const rectW = Math.max(1, barcode.xEnd - barcode.xStart);
+                    stillScanCtx.strokeRect(barcode.xStart, barcode.y - 20, rectW, 40);
+                    stillScanCtx.fillStyle = '#4caf50';
+                    stillScanCtx.font = '16px monospace';
+                    stillScanCtx.fillText(barcode.value, barcode.xStart, Math.max(16, barcode.y - 24));
+                }
+                URL.revokeObjectURL(url);
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+        });
+
+        updateSliderLabels();
+        updateSliderMaxToScreen();
+        window.addEventListener('resize', updateSliderMaxToScreen);
+        populateResolutions();
+        refreshCameras(false).catch(() => {});
+        startCamera();
+    </script>
+</body>
+</html>

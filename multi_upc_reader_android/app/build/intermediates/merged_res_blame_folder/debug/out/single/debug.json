@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.example.multiupcreader.app-merged_res-36:/layout_activity_main.xml.flat",
+        "source": "com.example.multiupcreader.app-main-38:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/home/brady/.gradle/daemon/8.10.2/com.example.multiupcreader.app-merged_res-36:/layout_activity_main.xml.flat",
+        "source": "/home/brady/.gradle/daemon/8.10.2/com.example.multiupcreader.app-main-38:/layout/activity_main.xml"
+    }
+]

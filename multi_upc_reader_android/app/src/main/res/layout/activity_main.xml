@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/splitGuideline"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <com.example.multiupcreader.OverlayView
+        android:id="@+id/overlayView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="@+id/previewView"
+        app:layout_constraintBottom_toBottomOf="@+id/previewView"
+        app:layout_constraintStart_toStartOf="@+id/previewView"
+        app:layout_constraintEnd_toEndOf="@+id/previewView" />
+
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/splitGuideline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.52" />
+
+    <ScrollView
+        android:id="@+id/resultPanel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#111111"
+        app:layout_constraintTop_toBottomOf="@+id/splitGuideline"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/resultLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="UPC"
+                android:textColor="#8BC34A"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/resultText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp"
+                android:paddingTop="4dp" />
+
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Rows: 25 | Adaptive: On | ROI: 70% x 35%"
+                android:textColor="#B0B0B0"
+                android:textSize="12sp"
+                android:paddingTop="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Threshold"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/thresholdValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="128"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/thresholdSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="255" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Rows To Scan"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/rowsValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="25"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/rowsSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="60" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ROI Width %"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/roiWidthValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="70"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/roiWidthSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ROI Height %"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/roiHeightValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="35"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/roiHeightSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="12dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Adaptive Threshold"
+                    android:textColor="#FFFFFF" />
+                <Switch
+                    android:id="@+id/adaptiveSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:paddingStart="12dp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Nonwhite Threshold"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/nonwhiteValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="200"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/nonwhiteSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="255" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Min Rows"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/minRowsValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="6"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/minRowsSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="80" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Max Rows"
+                android:textColor="#FFFFFF"
+                android:paddingTop="12dp" />
+            <TextView
+                android:id="@+id/maxRowsValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="40"
+                android:textColor="#8BC34A"
+                android:textSize="12sp" />
+            <SeekBar
+                android:id="@+id/maxRowsSeek"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="120" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="12dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Show Green Overlay (Still Image)"
+                    android:textColor="#FFFFFF" />
+                <Switch
+                    android:id="@+id/greenOverlaySwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:paddingStart="12dp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Center Row Bits"
+                android:textColor="#FFFFFF"
+                android:paddingTop="16dp" />
+            <TextView
+                android:id="@+id/centerRowBits"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="#8BC34A"
+                android:fontFamily="monospace" />
+            <Button
+                android:id="@+id/copyCenterRowBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Copy Center Row"
+                android:paddingTop="6dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Compressed Bits"
+                android:textColor="#FFFFFF"
+                android:paddingTop="16dp" />
+            <TextView
+                android:id="@+id/compressedBits"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="#8BC34A"
+                android:fontFamily="monospace" />
+            <TextView
+                android:id="@+id/compressedUpc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="UPC: -"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Compressed Rows"
+                android:textColor="#FFFFFF"
+                android:paddingTop="16dp" />
+            <TextView
+                android:id="@+id/compressedRows"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="#8BC34A"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Row UPCs"
+                android:textColor="#FFFFFF"
+                android:paddingTop="16dp" />
+            <TextView
+                android:id="@+id/rowUpcs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="#8BC34A"
+                android:fontFamily="monospace" />
+            <TextView
+                android:id="@+id/rowUpcsCommon"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Most common: -"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Scan Still Image"
+                android:textColor="#FFFFFF"
+                android:paddingTop="16dp" />
+            <Button
+                android:id="@+id/pickImageBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Choose Image" />
+            <ImageView
+                android:id="@+id/stillImageView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:paddingTop="8dp" />
+        </LinearLayout>
+    </ScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>

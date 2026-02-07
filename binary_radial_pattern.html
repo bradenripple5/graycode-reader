@@ -61,8 +61,8 @@
     <div class="controls">
       <label for="bandCount">Number of bands: <span id="bandCountVal">6</span></label>
       <input id="bandCount" type="range" min="1" max="12" value="6">
-      <label for="circleSize">Circle radius: <span id="circleSizeVal">484</span>px</label>
-      <input id="circleSize" type="range" min="10" max="350" value="350">
+      <label for="circleSize">Circle radius: <span id="circleSizeVal">400</span>px</label>
+      <input id="circleSize" type="range" min="10" max="400" value="400">
       <label>
         <input id="invertBits" type="checkbox">
         Invert bits
@@ -96,8 +96,8 @@
         Show 5° blue wedges
       </label>
 
-      <label for="centerGap">Center whitespace: <span id="centerGapVal">90</span>%</label>
-      <input id="centerGap" type="range" min="0" max="90" value="90">
+      <label for="centerGap">Center whitespace: <span id="centerGapVal">0</span>px</label>
+      <input id="centerGap" type="range" min="0" max="400" value="0">
       <label for="angleOffset">Angle offset: <span id="angleOffsetVal">0</span>°</label>
       <input id="angleOffset" type="range" min="0" max="359" value="0">
       <label for="rotateSpeed">Rotation speed: <span id="rotateSpeedVal">30</span>°/s</label>
@@ -139,7 +139,7 @@
       const numRings = data.length;
       const maxRadius = numRings * baseRingWidth;
       const scaledRadius = Math.max(1, radiusPx);
-      const gapRadius = (centerGapPercent / 100) * scaledRadius;
+      const gapRadius = Math.max(0, Math.min(centerGapPercent, scaledRadius));
       const ringWidth = (scaledRadius - gapRadius) / numRings;
       const angleOffset = (angleOffsetDeg * Math.PI) / 180;
       const markerThickness = Math.max(2, ringWidth);
@@ -443,9 +443,9 @@
       const sections = parseInt(bandInput.value, 10);
       const defaultRadius = sections * baseRingWidth;
       const maxRadius = Math.max(defaultRadius * 10, 10);
-      sizeInput.max = String(Math.round(maxRadius));
+      sizeInput.max = '400';
       if (sizeInput.value === "0") {
-        sizeInput.value = "300";
+        sizeInput.value = "400";
       }
 
       const radiusPx = parseInt(sizeInput.value, 10);
@@ -457,7 +457,8 @@
       const showAngleGuides = showAngleGuidesInput.checked;
       const showAngleGuides5 = showAngleGuides5Input.checked;
       const showAngleWedges5 = showAngleWedges5Input.checked;
-      const gapPercent = parseInt(gapInput.value, 10);
+      const gapPx = Math.max(0, Math.min(parseInt(gapInput.value, 10), radiusPx));
+      gapInput.max = String(radiusPx);
       const angleOffset = autoRotate ? currentAngle : parseFloat(angleInput.value);
       if (!autoRotate) {
         currentAngle = angleOffset;
@@ -466,7 +467,7 @@
 
       bandVal.textContent = sections;
       sizeVal.textContent = radiusPx;
-      gapVal.textContent = gapPercent;
+      gapVal.textContent = gapPx;
       angleVal.textContent = String(Math.round(displayAngle));
       speedVal.textContent = speedInput.value;
 
@@ -474,7 +475,7 @@
       renderRadialPattern(
         rings,
         canvas,
-        gapPercent,
+        gapPx,
         angleOffset,
         radiusPx,
         showAngles,

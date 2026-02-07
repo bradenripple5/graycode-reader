@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Further Pixel Analysis for Barcode Scanning</title>
+  <style>
+    :root {
+      --bg: #0e0f12;
+      --panel: #171a20;
+      --text: #e7eaf0;
+      --muted: #9aa3b2;
+      --accent: #76e0a8;
+      --accent-2: #5cb3ff;
+      --border: #2a2f3a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "SF Pro Text", "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, #1b2130 0%, #0e0f12 55%, #0b0c0f 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 24px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(90deg, rgba(118,224,168,0.08), rgba(92,179,255,0.08));
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      letter-spacing: 0.02em;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0b0d12;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #0b0d12;
+    }
+
+    canvas.overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: linear-gradient(135deg, #1f2430, #151923);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: border 0.2s ease, transform 0.2s ease;
+    }
+
+    button:hover { border-color: var(--accent-2); }
+    button:active { transform: translateY(1px); }
+
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .control-row label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .slider {
+      width: 100%;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      align-items: center;
+    }
+
+    .kv strong { color: var(--text); font-weight: 500; }
+
+    footer {
+      padding: 8px 16px 20px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Further Pixel Analysis for Barcode Scanning</h1>
+    <p>Auto-request highest camera resolution and show the actual stream settings.</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay" class="overlay"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="controls">
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop Camera</button>
+        <span class="pill" id="status">Idle</span>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <div class="control-row">
+          <input type="checkbox" id="rowCompareEnabled" checked />
+          <label for="rowCompareEnabled">Compare row to next row</label>
+        </div>
+        <div>
+          <label for="rowIndex" style="font-size:12px;color:var(--muted);">Row index</label>
+          <input type="range" id="rowIndex" class="slider" min="0" max="0" value="0" />
+          <div class="kv"><span>Row</span><strong id="rowIndexValue">0</strong></div>
+        </div>
+        <div class="control-row">
+          <input type="checkbox" id="nRowsEnabled" />
+          <label for="nRowsEnabled">Compare N rows window</label>
+        </div>
+        <div>
+          <label for="nRows" style="font-size:12px;color:var(--muted);">N rows</label>
+          <input type="range" id="nRows" class="slider" min="2" max="32" value="2" />
+          <div class="kv"><span>N</span><strong id="nRowsValue">2</strong></div>
+        </div>
+        <div>
+          <label for="nRowsDrift" style="font-size:12px;color:var(--muted);">Row drift (+/-)</label>
+          <input type="range" id="nRowsDrift" class="slider" min="0" max="5" value="0" />
+          <div class="kv"><span>Drift</span><strong id="nRowsDriftValue">0</strong></div>
+        </div>
+        <div class="control-row">
+          <input type="checkbox" id="chunkEnabled" />
+          <label for="chunkEnabled">Chunk change detection</label>
+        </div>
+        <div>
+          <label for="chunkLen" style="font-size:12px;color:var(--muted);">Chunk length (pixels)</label>
+          <input type="range" id="chunkLen" class="slider" min="2" max="256" value="16" />
+          <div class="kv"><span>Len</span><strong id="chunkLenValue">16</strong></div>
+        </div>
+        <div>
+          <label for="chunkThreshold" style="font-size:12px;color:var(--muted);">Min transitions per chunk</label>
+          <input type="range" id="chunkThreshold" class="slider" min="1" max="15" value="4" />
+          <div class="kv"><span>Threshold</span><strong id="chunkThresholdValue">4</strong></div>
+        </div>
+        <div>
+          <label for="chunkDelta" style="font-size:12px;color:var(--muted);">Min per-pixel delta</label>
+          <input type="range" id="chunkDelta" class="slider" min="1" max="255" value="10" />
+          <div class="kv"><span>Delta</span><strong id="chunkDeltaValue">10</strong></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <div class="kv"><span>Facing</span><strong id="facing">environment</strong></div>
+        <div class="kv"><span>Requested</span><strong id="requested">max (ideal)</strong></div>
+        <div class="kv"><span>Actual</span><strong id="actual">-</strong></div>
+        <div class="kv"><span>Frame Rate</span><strong id="fps">-</strong></div>
+        <div class="kv"><span>Track Settings</span><strong id="settings">-</strong></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Tip: On iOS, use Safari; on Android, use Chrome. HTTPS is required for camera access.
+  </footer>
+
+  <script>
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const actualEl = document.getElementById('actual');
+    const fpsEl = document.getElementById('fps');
+    const settingsEl = document.getElementById('settings');
+    const rowCompareEnabled = document.getElementById('rowCompareEnabled');
+    const rowIndex = document.getElementById('rowIndex');
+    const rowIndexValue = document.getElementById('rowIndexValue');
+    const nRowsEnabled = document.getElementById('nRowsEnabled');
+    const nRows = document.getElementById('nRows');
+    const nRowsValue = document.getElementById('nRowsValue');
+    const nRowsDrift = document.getElementById('nRowsDrift');
+    const nRowsDriftValue = document.getElementById('nRowsDriftValue');
+    const chunkEnabled = document.getElementById('chunkEnabled');
+    const chunkLen = document.getElementById('chunkLen');
+    const chunkLenValue = document.getElementById('chunkLenValue');
+    const chunkThreshold = document.getElementById('chunkThreshold');
+    const chunkThresholdValue = document.getElementById('chunkThresholdValue');
+    const chunkDelta = document.getElementById('chunkDelta');
+    const chunkDeltaValue = document.getElementById('chunkDeltaValue');
+
+    let stream = null;
+    let rafId = null;
+    let offscreen = null;
+    let offCtx = null;
+    let maskRow = null;
+    let maskNRows = null;
+    let maskChunk = null;
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    async function startCamera() {
+      if (stream) return;
+      setStatus('Requesting camera...');
+
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 4096 },
+          height: { ideal: 2160 },
+          frameRate: { ideal: 60 }
+        }
+      };
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        await video.play();
+
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings ? track.getSettings() : {};
+
+        const w = settings.width || video.videoWidth;
+        const h = settings.height || video.videoHeight;
+        actualEl.textContent = (w && h) ? `${w} x ${h}` : 'unknown';
+        fpsEl.textContent = settings.frameRate ? `${settings.frameRate} fps` : 'unknown';
+        settingsEl.textContent = JSON.stringify({
+          width: settings.width,
+          height: settings.height,
+          frameRate: settings.frameRate,
+          deviceId: settings.deviceId
+        });
+
+        setupOverlay();
+        startAnalysisLoop();
+
+        setStatus('Streaming');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        setStatus('Error');
+        actualEl.textContent = '-';
+        fpsEl.textContent = '-';
+        settingsEl.textContent = '-';
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        console.error(err);
+        alert('Camera access failed: ' + err.message);
+      }
+    }
+
+    function stopCamera() {
+      if (!stream) return;
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+      stream = null;
+      video.srcObject = null;
+      stopAnalysisLoop();
+      setStatus('Stopped');
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener('click', startCamera);
+    stopBtn.addEventListener('click', stopCamera);
+
+    function setupOverlay() {
+      const w = video.videoWidth || 0;
+      const h = video.videoHeight || 0;
+      overlay.width = w;
+      overlay.height = h;
+      rowIndex.max = Math.max(0, h - 2);
+      const centerRow = Math.floor(h / 2);
+      if (!rowIndex.dataset.userSet) rowIndex.value = Math.min(centerRow, rowIndex.max);
+      if (Number(rowIndex.value) > rowIndex.max) rowIndex.value = rowIndex.max;
+      rowIndexValue.textContent = rowIndex.value;
+      const maxChunkLen = Math.max(2, Math.min(1024, w || 2));
+      chunkLen.max = maxChunkLen;
+      if (Number(chunkLen.value) > maxChunkLen) chunkLen.value = maxChunkLen;
+      chunkLenValue.textContent = chunkLen.value;
+      updateChunkThresholdMax();
+
+      if (!offscreen) {
+        offscreen = document.createElement('canvas');
+        offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+      }
+      offscreen.width = w;
+      offscreen.height = h;
+
+      const size = w * h;
+      if (!maskRow || maskRow.length !== size) maskRow = new Uint8Array(size);
+      if (!maskNRows || maskNRows.length !== size) maskNRows = new Uint8Array(size);
+      if (!maskChunk || maskChunk.length !== size) maskChunk = new Uint8Array(size);
+    }
+
+    function startAnalysisLoop() {
+      if (rafId) return;
+      const ctx = overlay.getContext('2d');
+
+      const loop = () => {
+        if (!stream) return;
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (w === 0 || h === 0) {
+          rafId = requestAnimationFrame(loop);
+          return;
+        }
+
+        if (overlay.width !== w || overlay.height !== h) {
+          setupOverlay();
+        }
+
+        offCtx.drawImage(video, 0, 0, w, h);
+        const frame = offCtx.getImageData(0, 0, w, h);
+        const data = frame.data;
+
+        const out = ctx.createImageData(w, h);
+        const outData = out.data;
+
+        const rowY = Number(rowIndex.value);
+        const windowN = Number(nRows.value);
+        const useRowCompare = rowCompareEnabled.checked;
+        const useNRows = nRowsEnabled.checked;
+        const useChunk = chunkEnabled.checked;
+
+        const size = w * h;
+        if (!maskRow || maskRow.length !== size) maskRow = new Uint8Array(size);
+        if (!maskNRows || maskNRows.length !== size) maskNRows = new Uint8Array(size);
+        if (!maskChunk || maskChunk.length !== size) maskChunk = new Uint8Array(size);
+        maskRow.fill(0);
+        maskNRows.fill(0);
+        maskChunk.fill(0);
+
+        if (useRowCompare && rowY >= 0 && rowY < h - 1) {
+          for (let x = 0; x < w; x++) {
+            const idxA = (rowY * w + x) * 4;
+            const idxB = ((rowY + 1) * w + x) * 4;
+            const same =
+              data[idxA] === data[idxB] &&
+              data[idxA + 1] === data[idxB + 1] &&
+              data[idxA + 2] === data[idxB + 2];
+            if (same) {
+              maskRow[rowY * w + x] = 1;
+              maskRow[(rowY + 1) * w + x] = 1;
+            }
+          }
+        }
+
+        if (useNRows && windowN >= 2) {
+          const drift = Number(nRowsDrift.value);
+          for (let x = 0; x < w; x++) {
+            let matched = false;
+            for (let d = -drift; d <= drift; d++) {
+              const startY = rowY + d;
+              if (startY < 0 || startY + windowN > h) continue;
+              const baseIdx = (startY * w + x) * 4;
+              const r0 = data[baseIdx];
+              const g0 = data[baseIdx + 1];
+              const b0 = data[baseIdx + 2];
+              let allSame = true;
+              for (let n = 1; n < windowN; n++) {
+                const idx = ((startY + n) * w + x) * 4;
+                if (data[idx] !== r0 || data[idx + 1] !== g0 || data[idx + 2] !== b0) {
+                  allSame = false;
+                  break;
+                }
+              }
+              if (allSame) {
+                for (let n = 0; n < windowN; n++) {
+                  maskNRows[(startY + n) * w + x] = 1;
+                }
+                matched = true;
+                break;
+              }
+            }
+            if (matched) continue;
+          }
+        }
+
+        if (useChunk) {
+          const y = Number(rowIndex.value);
+          const len = Math.max(2, Number(chunkLen.value));
+          const threshold = Math.max(1, Number(chunkThreshold.value));
+          const delta = Math.max(1, Number(chunkDelta.value));
+
+          if (y >= 0 && y < h) {
+            for (let startX = 0; startX < w; startX += len) {
+              const endX = Math.min(startX + len - 1, w - 1);
+              let transitions = 0;
+              for (let x = startX + 1; x <= endX; x++) {
+                const idxPrev = (y * w + (x - 1)) * 4;
+                const idx = (y * w + x) * 4;
+                const dr = Math.abs(data[idx] - data[idxPrev]);
+                const dg = Math.abs(data[idx + 1] - data[idxPrev + 1]);
+                const db = Math.abs(data[idx + 2] - data[idxPrev + 2]);
+                if (dr >= delta || dg >= delta || db >= delta) {
+                  transitions++;
+                }
+              }
+
+              if (transitions >= threshold) {
+                for (let x = startX; x <= endX; x++) {
+                  maskChunk[y * w + x] = 1;
+                }
+              }
+            }
+          }
+        }
+
+        const anyEnabled = useRowCompare || useNRows || useChunk;
+        if (!anyEnabled) {
+          ctx.putImageData(out, 0, 0);
+          rafId = requestAnimationFrame(loop);
+          return;
+        }
+
+        // AND logic: keep only pixels that pass all enabled checks.
+        for (let p = 0; p < size; p++) {
+          let passes = true;
+          if (useRowCompare) passes = passes && maskRow[p] === 1;
+          if (useNRows) passes = passes && maskNRows[p] === 1;
+          if (useChunk) passes = passes && maskChunk[p] === 1;
+
+          const idx = p * 4;
+          if (passes) {
+            outData[idx] = 0;
+            outData[idx + 1] = 255;
+            outData[idx + 2] = 0;
+            outData[idx + 3] = 200;
+          } else {
+            outData[idx] = 0;
+            outData[idx + 1] = 0;
+            outData[idx + 2] = 0;
+            outData[idx + 3] = 0;
+          }
+        }
+
+        ctx.putImageData(out, 0, 0);
+        rafId = requestAnimationFrame(loop);
+      };
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    function stopAnalysisLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      const ctx = overlay.getContext('2d');
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    rowIndex.addEventListener('input', () => {
+      rowIndexValue.textContent = rowIndex.value;
+      rowIndex.dataset.userSet = '1';
+    });
+
+    nRows.addEventListener('input', () => {
+      nRowsValue.textContent = nRows.value;
+    });
+
+    nRowsDrift.addEventListener('input', () => {
+      nRowsDriftValue.textContent = nRowsDrift.value;
+    });
+
+    chunkLen.addEventListener('input', () => {
+      chunkLenValue.textContent = chunkLen.value;
+      updateChunkThresholdMax();
+    });
+
+    chunkThreshold.addEventListener('input', () => {
+      chunkThresholdValue.textContent = chunkThreshold.value;
+    });
+
+    chunkDelta.addEventListener('input', () => {
+      chunkDeltaValue.textContent = chunkDelta.value;
+    });
+
+    function updateChunkThresholdMax() {
+      const max = Math.max(1, Number(chunkLen.value) - 1);
+      chunkThreshold.max = max;
+      if (Number(chunkThreshold.value) > max) chunkThreshold.value = max;
+      chunkThresholdValue.textContent = chunkThreshold.value;
+    }
+  </script>
+</body>
+</html>

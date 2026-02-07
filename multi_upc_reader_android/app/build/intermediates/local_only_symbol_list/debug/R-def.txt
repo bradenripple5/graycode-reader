@@ -1,0 +1,37 @@
+R_DEF: Internal format may change without notice
+local
+id adaptiveSwitch
+id centerRowBits
+id compressedBits
+id compressedRows
+id compressedUpc
+id copyCenterRowBtn
+id greenOverlaySwitch
+id maxRowsSeek
+id maxRowsValue
+id minRowsSeek
+id minRowsValue
+id nonwhiteSeek
+id nonwhiteValue
+id overlayView
+id pickImageBtn
+id previewView
+id resultLabel
+id resultPanel
+id resultText
+id roiHeightSeek
+id roiHeightValue
+id roiWidthSeek
+id roiWidthValue
+id rowUpcs
+id rowUpcsCommon
+id rowsSeek
+id rowsValue
+id splitGuideline
+id statusText
+id stillImageView
+id thresholdSeek
+id thresholdValue
+layout activity_main
+string app_name
+style Theme.MultiUpcReader
