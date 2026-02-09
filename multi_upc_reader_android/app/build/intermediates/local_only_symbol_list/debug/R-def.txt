@@ -1,6 +1,7 @@
 R_DEF: Internal format may change without notice
 local
 id adaptiveSwitch
+id bwView
 id centerRowBits
 id compressedBits
 id compressedRows
@@ -11,6 +12,7 @@ id maxRowsSeek
 id maxRowsValue
 id minRowsSeek
 id minRowsValue
+id noUpcImage
 id nonwhiteSeek
 id nonwhiteValue
 id overlayView
@@ -27,6 +29,9 @@ id rowUpcs
 id rowUpcsCommon
 id rowsSeek
 id rowsValue
+id showCenterBitsSwitch
+id showCompressedBitsSwitch
+id showCompressedRowsSwitch
 id splitGuideline
 id statusText
 id stillImageView

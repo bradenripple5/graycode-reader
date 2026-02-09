@@ -3176,6 +3176,7 @@ id bounceBoth
 id bounceEnd
 id bounceStart
 id buttonPanel
+id bwView
 id cache_measures
 id callMeasure
 id cancel_button
@@ -3403,6 +3404,7 @@ id neverCompleteToEnd
 id neverCompleteToStart
 id noScroll
 id noState
+id noUpcImage
 id none
 id nonwhiteSeek
 id nonwhiteValue
@@ -3500,6 +3502,9 @@ id selection_type
 id sharedValueSet
 id sharedValueUnset
 id shortcut
+id showCenterBitsSwitch
+id showCompressedBitsSwitch
+id showCompressedRowsSwitch
 id showCustom
 id showHome
 id showTitle

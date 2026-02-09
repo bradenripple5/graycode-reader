@@ -25,6 +25,14 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
@@ -33,6 +41,7 @@ import kotlin.math.roundToInt
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: OverlayView
+    private lateinit var bwView: ImageView
     private lateinit var resultText: TextView
     private lateinit var statusText: TextView
     private lateinit var centerRowBitsView: TextView
@@ -49,12 +58,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nonwhiteValue: TextView
     private lateinit var minRowsValue: TextView
     private lateinit var maxRowsValue: TextView
+    private lateinit var noUpcImage: ImageView
+    private lateinit var showCenterBitsSwitch: Switch
+    private lateinit var showCompressedBitsSwitch: Switch
+    private lateinit var showCompressedRowsSwitch: Switch
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
     @Volatile private var rowsToScan = 25
     @Volatile private var adaptiveThreshold = true
     @Volatile private var thresholdBias = 0
+    @Volatile private var thresholdValueAbs = 128
     @Volatile private var roiWidthFrac = 0.7f
     @Volatile private var roiHeightFrac = 0.35f
     @Volatile private var nonwhiteThreshold = 200
@@ -63,6 +77,19 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var showGreenOverlay = true
     @Volatile private var lastUiUpdateMs = 0L
     @Volatile private var frameCounter = 0
+    @Volatile private var lastAutoRoiX = -1
+    @Volatile private var autoRoiEnabled = false
+    @Volatile private var avgRows = 5
+    @Volatile private var edgeBoost = 0.8f
+
+    private val zxingReader = MultiFormatReader().apply {
+        val formats = listOf(
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.UPC_E,
+            BarcodeFormat.EAN_13
+        )
+        setHints(mapOf(DecodeHintType.POSSIBLE_FORMATS to formats))
+    }
 
     private val pickImage =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -87,6 +114,8 @@ class MainActivity : AppCompatActivity() {
 
         previewView = findViewById(R.id.previewView)
         overlayView = findViewById(R.id.overlayView)
+        bwView = findViewById(R.id.bwView)
+        previewView.visibility = android.view.View.INVISIBLE
         resultText = findViewById(R.id.resultText)
         statusText = findViewById(R.id.statusText)
         centerRowBitsView = findViewById(R.id.centerRowBits)
@@ -96,6 +125,7 @@ class MainActivity : AppCompatActivity() {
         rowUpcsView = findViewById(R.id.rowUpcs)
         rowUpcsCommonView = findViewById(R.id.rowUpcsCommon)
         stillImageView = findViewById(R.id.stillImageView)
+        noUpcImage = findViewById(R.id.noUpcImage)
         thresholdValue = findViewById(R.id.thresholdValue)
         rowsValue = findViewById(R.id.rowsValue)
         roiWidthValue = findViewById(R.id.roiWidthValue)
@@ -103,6 +133,9 @@ class MainActivity : AppCompatActivity() {
         nonwhiteValue = findViewById(R.id.nonwhiteValue)
         minRowsValue = findViewById(R.id.minRowsValue)
         maxRowsValue = findViewById(R.id.maxRowsValue)
+        showCenterBitsSwitch = findViewById(R.id.showCenterBitsSwitch)
+        showCompressedBitsSwitch = findViewById(R.id.showCompressedBitsSwitch)
+        showCompressedRowsSwitch = findViewById(R.id.showCompressedRowsSwitch)
         statusText.text = statusLine()
 
         val thresholdSeek = findViewById<SeekBar>(R.id.thresholdSeek)
@@ -110,6 +143,7 @@ class MainActivity : AppCompatActivity() {
         thresholdValue.text = "128"
         thresholdSeek.setOnSeekBarChangeListener(simpleSeek { value ->
             thresholdBias = value - 128
+            thresholdValueAbs = value
             thresholdValue.text = value.toString()
         })
 
@@ -142,6 +176,7 @@ class MainActivity : AppCompatActivity() {
         adaptiveSwitch.setOnCheckedChangeListener { _, isChecked ->
             adaptiveThreshold = isChecked
         }
+
 
         val nonwhiteSeek = findViewById<SeekBar>(R.id.nonwhiteSeek)
         nonwhiteSeek.progress = nonwhiteThreshold
@@ -233,7 +268,18 @@ class MainActivity : AppCompatActivity() {
 
         val roiW = max(1, (uprightWidth * roiWidthFrac).roundToInt())
         val roiH = max(1, (uprightHeight * roiHeightFrac).roundToInt())
-        val roiX = (uprightWidth - roiW) / 2
+        val defaultRoiX = (uprightWidth - roiW) / 2
+        val roiX = if (autoRoiEnabled) {
+            if (frameCounter % 3 == 0 || lastAutoRoiX < 0) {
+                lastAutoRoiX = findAutoRoiX(
+                    data, width, height, rowStride, pixelStride, rotation,
+                    uprightWidth, uprightHeight, roiW, roiH
+                )
+            }
+            lastAutoRoiX.coerceIn(0, max(0, uprightWidth - roiW))
+        } else {
+            defaultRoiX
+        }
         val roiY = (uprightHeight - roiH) / 2
 
         val centerY = roiY + roiH / 2
@@ -241,8 +287,17 @@ class MainActivity : AppCompatActivity() {
         val yStart = max(roiY, centerY - half)
         val yEnd = min(roiY + roiH - 1, centerY + half)
 
-        val counts = HashMap<String, Int>()
+        val centerBits = getRowBitsAtY(
+            data, width, height, rowStride, pixelStride, rotation, centerY, roiX, roiW
+        )
+        val centerBitsStr = bitsToString(centerBits)
+        val compressed = compressBits(centerBitsStr)
+        val compressedUpc = decodeUpcFromBitString(compressed)
+        val zxingUpc = decodeZxingYuv(
+            data, width, height, rotation, roiX, roiY, roiW, roiH
+        )
 
+        val counts = HashMap<String, Int>()
         for (y in yStart..yEnd) {
             val rowBits = getRowBitsAtY(
                 data, width, height, rowStride, pixelStride, rotation, y, roiX, roiW
@@ -252,14 +307,6 @@ class MainActivity : AppCompatActivity() {
                 counts[decoded] = (counts[decoded] ?: 0) + 1
             }
         }
-
-        val best = counts.maxByOrNull { it.value }?.key
-        val centerBits = getRowBitsAtY(
-            data, width, height, rowStride, pixelStride, rotation, centerY, roiX, roiW
-        )
-        val centerBitsStr = bitsToString(centerBits)
-        val compressed = compressBits(centerBitsStr)
-        val compressedUpc = decodeUpcFromBitString(compressed)
 
         val now = System.currentTimeMillis()
         val shouldUpdateHeavy = (frameCounter % 5 == 0) && (now - lastUiUpdateMs > 200)
@@ -275,14 +322,13 @@ class MainActivity : AppCompatActivity() {
         } else null
 
         runOnUiThread {
-            val count = if (best != null) counts[best] ?: 0 else 0
-            resultText.text = if (best != null) "$best ($count/$rowsToScan)" else "-"
+            resultText.text = zxingUpc ?: "No UPC"
             statusText.text = statusLine(rotation)
-            centerRowBitsView.text = centerBitsStr
-            compressedBitsView.text = compressed
-            compressedUpcView.text = "UPC: ${compressedUpc ?: "-"}"
+            centerRowBitsView.text = if (showCenterBitsSwitch.isChecked) centerBitsStr else "-"
+            compressedBitsView.text = if (showCompressedBitsSwitch.isChecked) compressed else "-"
+            compressedUpcView.text = "UPC: ${(zxingUpc ?: compressedUpc) ?: "-"}"
             if (compressedRows != null && rowUpcs != null) {
-                compressedRowsView.text = compressedRows
+                compressedRowsView.text = if (showCompressedRowsSwitch.isChecked) compressedRows else "-"
                 rowUpcsView.text = rowUpcs.lines
                 rowUpcsCommonView.text = rowUpcs.summary
                 lastUiUpdateMs = now
@@ -290,6 +336,20 @@ class MainActivity : AppCompatActivity() {
             overlayView.updateRoi(
                 roiX, roiY, roiW, roiH, centerY, uprightWidth, uprightHeight
             )
+            if (zxingUpc == null) {
+                noUpcImage.visibility = android.view.View.VISIBLE
+                noUpcImage.setImageBitmap(buildNoUpcBitmap(centerBits, roiW))
+            } else {
+                noUpcImage.visibility = android.view.View.GONE
+            }
+            if (frameCounter % 4 == 0) {
+                bwView.setImageBitmap(
+                    buildThresholdBitmap(
+                        data, width, height, rowStride, pixelStride, rotation,
+                        uprightWidth, uprightHeight, thresholdValueAbs
+                    )
+                )
+            }
         }
 
         image.close()
@@ -306,25 +366,13 @@ class MainActivity : AppCompatActivity() {
         xStart: Int,
         roiWidth: Int
     ): IntArray {
-        var threshold = 128 + thresholdBias
-        if (adaptiveThreshold) {
-            var sum = 0
-            for (x in xStart until xStart + roiWidth) {
-                val v = sampleLuma(luma, width, height, rowStride, pixelStride, rotation, x, y)
-                sum += v
-            }
-            val mean = sum.toFloat() / roiWidth
-            threshold = (mean + thresholdBias).roundToInt().coerceIn(0, 255)
-        }
-
-        val bits = IntArray(roiWidth)
-        var idx = 0
-        for (x in xStart until xStart + roiWidth) {
-            val v = sampleLuma(luma, width, height, rowStride, pixelStride, rotation, x, y)
-            bits[idx] = if (v < threshold) 1 else 0
-            idx++
-        }
-        return bits
+        val row = buildAveragedRow(
+            luma, width, height, rowStride, pixelStride, rotation, y, xStart, roiWidth, avgRows
+        )
+        val stretched = contrastStretch(row)
+        val boosted = edgeBoostRow(stretched, edgeBoost)
+        val threshold = computeThreshold(boosted, adaptiveThreshold, thresholdBias)
+        return toBits(boosted, threshold)
     }
 
     private fun sampleLuma(
@@ -345,6 +393,124 @@ class MainActivity : AppCompatActivity() {
         }
         val index = by * rowStride + bx * pixelStride
         return luma[index].toInt() and 0xFF
+    }
+
+    private fun buildAveragedRow(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        rotation: Int,
+        y: Int,
+        xStart: Int,
+        roiWidth: Int,
+        rows: Int
+    ): IntArray {
+        val half = max(0, rows / 2)
+        val out = IntArray(roiWidth)
+        val top = max(0, y - half)
+        val bottom = min(height - 1, y + half)
+        val count = max(1, bottom - top + 1)
+        var idx = 0
+        for (x in xStart until xStart + roiWidth) {
+            var sum = 0
+            for (yy in top..bottom) {
+                sum += sampleLuma(luma, width, height, rowStride, pixelStride, rotation, x, yy)
+            }
+            out[idx] = (sum / count).coerceIn(0, 255)
+            idx++
+        }
+        return out
+    }
+
+    private fun contrastStretch(row: IntArray): IntArray {
+        var minV = 255
+        var maxV = 0
+        for (v in row) {
+            if (v < minV) minV = v
+            if (v > maxV) maxV = v
+        }
+        if (maxV - minV < 8) return row
+        val out = IntArray(row.size)
+        val scale = 255f / (maxV - minV)
+        for (i in row.indices) {
+            out[i] = ((row[i] - minV) * scale).roundToInt().coerceIn(0, 255)
+        }
+        return out
+    }
+
+    private fun edgeBoostRow(row: IntArray, strength: Float): IntArray {
+        if (strength <= 0f || row.size < 3) return row
+        val out = IntArray(row.size)
+        out[0] = row[0]
+        out[row.size - 1] = row[row.size - 1]
+        for (i in 1 until row.size - 1) {
+            val avg = (row[i - 1] + row[i] + row[i + 1]) / 3
+            val boosted = row[i] + ((row[i] - avg) * strength)
+            out[i] = boosted.roundToInt().coerceIn(0, 255)
+        }
+        return out
+    }
+
+    private fun computeThreshold(row: IntArray, adaptive: Boolean, bias: Int): Int {
+        if (!adaptive) return thresholdValueAbs.coerceIn(0, 255)
+        var sum = 0
+        for (v in row) sum += v
+        val mean = sum.toFloat() / max(1, row.size)
+        return (mean + bias).roundToInt().coerceIn(0, 255)
+    }
+
+    private fun toBits(row: IntArray, threshold: Int): IntArray {
+        val bits = IntArray(row.size)
+        for (i in row.indices) {
+            bits[i] = if (row[i] < threshold) 1 else 0
+        }
+        return bits
+    }
+
+    private fun findAutoRoiX(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        rotation: Int,
+        uprightW: Int,
+        uprightH: Int,
+        roiW: Int,
+        roiH: Int
+    ): Int {
+        val centerY = uprightH / 2
+        val band = min(20, roiH)
+        val yStart = max(0, centerY - band / 2)
+        val yEnd = min(uprightH - 1, centerY + band / 2)
+
+        val energy = IntArray(uprightW)
+        for (y in yStart..yEnd) {
+            var prev = sampleLuma(luma, width, height, rowStride, pixelStride, rotation, 0, y)
+            for (x in 1 until uprightW) {
+                val v = sampleLuma(luma, width, height, rowStride, pixelStride, rotation, x, y)
+                energy[x] += kotlin.math.abs(v - prev)
+                prev = v
+            }
+        }
+
+        val prefix = IntArray(uprightW + 1)
+        for (i in 0 until uprightW) {
+            prefix[i + 1] = prefix[i] + energy[i]
+        }
+        var bestX = 0
+        var bestScore = -1
+        val maxX = max(0, uprightW - roiW)
+        for (x in 0..maxX) {
+            val score = prefix[x + roiW] - prefix[x]
+            if (score > bestScore) {
+                bestScore = score
+                bestX = x
+            }
+        }
+        return bestX
     }
 
     private fun decodeRowBits(bits: IntArray): String? {
@@ -530,7 +696,11 @@ class MainActivity : AppCompatActivity() {
 
         val roiW = max(1, (width * roiWidthFrac).roundToInt())
         val roiH = max(1, (height * roiHeightFrac).roundToInt())
-        val roiX = (width - roiW) / 2
+        val roiX = if (autoRoiEnabled) {
+            findAutoRoiXBitmap(src, roiW, roiH)
+        } else {
+            (width - roiW) / 2
+        }
         val roiY = (height - roiH) / 2
 
         val centerY = roiY + roiH / 2
@@ -546,10 +716,15 @@ class MainActivity : AppCompatActivity() {
         val centerBitsStr = bitsToString(centerBits)
         val compressed = compressBits(centerBitsStr)
         val compressedUpc = decodeUpcFromBitString(compressed)
+        val zxingUpc = decodeZxingBitmap(src, roiX, roiY, roiW, roiH)
         val compressedRows = buildCompressedRowsTextBitmap(src, roiX, roiW, yStart, yEnd)
         val rowUpcs = buildRowUpcsTextBitmap(src, roiX, roiW, yStart, yEnd)
 
-        val barcode = detectBarcodeRowBitmap(src, roiX, roiW, roiY, roiH)
+        val barcode = if (zxingUpc != null) {
+            BarcodeHit(zxingUpc, roiX, roiX + roiW, centerY)
+        } else {
+            detectBarcodeRowBitmap(src, roiX, roiW, roiY, roiH)
+        }
         if (barcode != null) {
             val canvas = Canvas(src)
             val paint = Paint().apply {
@@ -571,7 +746,7 @@ class MainActivity : AppCompatActivity() {
 
         centerRowBitsView.text = centerBitsStr
         compressedBitsView.text = compressed
-        compressedUpcView.text = "UPC: ${compressedUpc ?: "-"}"
+        compressedUpcView.text = "UPC: ${(zxingUpc ?: compressedUpc) ?: "-"}"
         compressedRowsView.text = compressedRows
         rowUpcsView.text = rowUpcs.lines
         rowUpcsCommonView.text = rowUpcs.summary
@@ -598,31 +773,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getRowBitsAtYBitmap(bitmap: Bitmap, y: Int, xStart: Int, roiWidth: Int): IntArray {
-        val width = bitmap.width
-        val rowPixels = IntArray(width)
-        bitmap.getPixels(rowPixels, 0, width, 0, y, width, 1)
-
-        var threshold = 128 + thresholdBias
-        if (adaptiveThreshold) {
-            var sum = 0
-            for (x in xStart until xStart + roiWidth) {
-                val c = rowPixels[x]
-                val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
-                sum += g
-            }
-            val mean = sum.toFloat() / roiWidth
-            threshold = (mean + thresholdBias).roundToInt().coerceIn(0, 255)
-        }
-
-        val bits = IntArray(roiWidth)
-        var idx = 0
-        for (x in xStart until xStart + roiWidth) {
-            val c = rowPixels[x]
-            val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
-            bits[idx] = if (g < threshold) 1 else 0
-            idx++
-        }
-        return bits
+        val row = buildAveragedRowBitmap(bitmap, y, xStart, roiWidth, avgRows)
+        val stretched = contrastStretch(row)
+        val boosted = edgeBoostRow(stretched, edgeBoost)
+        val threshold = computeThreshold(boosted, adaptiveThreshold, thresholdBias)
+        return toBits(boosted, threshold)
     }
 
     private fun buildCompressedRowsTextBitmap(
@@ -667,6 +822,104 @@ class MainActivity : AppCompatActivity() {
             "Most common: -"
         }
         return RowUpcResult(lines.joinToString("\n"), summary)
+    }
+
+    private fun buildNoUpcBitmap(bits: IntArray, roiWidth: Int): Bitmap {
+        val height = 80
+        val width = max(1, roiWidth)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint()
+        for (x in 0 until width) {
+            paint.color = if (bits.getOrNull(x) == 1) Color.BLACK else Color.WHITE
+            canvas.drawLine(x.toFloat(), 0f, x.toFloat(), height.toFloat(), paint)
+        }
+        return bitmap
+    }
+
+    private fun buildThresholdBitmap(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        pixelStride: Int,
+        rotation: Int,
+        uprightW: Int,
+        uprightH: Int,
+        threshold: Int
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(uprightW, uprightH, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(uprightW * uprightH)
+        var idx = 0
+        for (y in 0 until uprightH) {
+            for (x in 0 until uprightW) {
+                val v = sampleLuma(luma, width, height, rowStride, pixelStride, rotation, x, y)
+                pixels[idx] = if (v < threshold) Color.BLACK else Color.WHITE
+                idx++
+            }
+        }
+        bmp.setPixels(pixels, 0, uprightW, 0, 0, uprightW, uprightH)
+        return bmp
+    }
+
+
+    private fun decodeZxingYuv(
+        data: ByteArray,
+        width: Int,
+        height: Int,
+        rotation: Int,
+        roiX: Int,
+        roiY: Int,
+        roiW: Int,
+        roiH: Int
+    ): String? {
+        return try {
+            val source = PlanarYUVLuminanceSource(
+                data, width, height, 0, 0, width, height, false
+            )
+            var bitmap = BinaryBitmap(HybridBinarizer(source))
+            if (bitmap.isRotateSupported) {
+                val turns = ((rotation / 90) % 4 + 4) % 4
+                repeat(turns) {
+                    bitmap = bitmap.rotateCounterClockwise()
+                }
+            }
+            if (bitmap.isCropSupported) {
+                bitmap = bitmap.crop(roiX, roiY, roiW, roiH)
+            }
+            val result = zxingReader.decodeWithState(bitmap)
+            zxingReader.reset()
+            result.text
+        } catch (_: NotFoundException) {
+            null
+        } catch (_: Throwable) {
+            null
+        } finally {
+            zxingReader.reset()
+        }
+    }
+
+    private fun decodeZxingBitmap(bitmap: Bitmap, roiX: Int, roiY: Int, roiW: Int, roiH: Int): String? {
+        return try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            val source = RGBLuminanceSource(width, height, pixels)
+            var bb = BinaryBitmap(HybridBinarizer(source))
+            if (bb.isCropSupported) {
+                bb = bb.crop(roiX, roiY, roiW, roiH)
+            }
+            val result = zxingReader.decodeWithState(bb)
+            zxingReader.reset()
+            result.text
+        } catch (_: NotFoundException) {
+            null
+        } catch (_: Throwable) {
+            null
+        } finally {
+            zxingReader.reset()
+        }
     }
 
     private fun applyGreenOverlay(
@@ -728,5 +981,77 @@ class MainActivity : AppCompatActivity() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("UPC", text)
         clipboard.setPrimaryClip(clip)
+    }
+
+    private fun buildAveragedRowBitmap(
+        bitmap: Bitmap,
+        y: Int,
+        xStart: Int,
+        roiWidth: Int,
+        rows: Int
+    ): IntArray {
+        val width = bitmap.width
+        val height = bitmap.height
+        val half = max(0, rows / 2)
+        val top = max(0, y - half)
+        val bottom = min(height - 1, y + half)
+        val count = max(1, bottom - top + 1)
+
+        val sums = IntArray(roiWidth)
+        val rowPixels = IntArray(width)
+        for (yy in top..bottom) {
+            bitmap.getPixels(rowPixels, 0, width, 0, yy, width, 1)
+            var idx = 0
+            for (x in xStart until xStart + roiWidth) {
+                val c = rowPixels[x]
+                val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+                sums[idx] += g
+                idx++
+            }
+        }
+        val out = IntArray(roiWidth)
+        for (i in 0 until roiWidth) {
+            out[i] = (sums[i] / count).coerceIn(0, 255)
+        }
+        return out
+    }
+
+    private fun findAutoRoiXBitmap(bitmap: Bitmap, roiW: Int, roiH: Int): Int {
+        val width = bitmap.width
+        val height = bitmap.height
+        val centerY = height / 2
+        val band = min(20, roiH)
+        val yStart = max(0, centerY - band / 2)
+        val yEnd = min(height - 1, centerY + band / 2)
+
+        val energy = IntArray(width)
+        val rowPixels = IntArray(width)
+        for (y in yStart..yEnd) {
+            bitmap.getPixels(rowPixels, 0, width, 0, y, width, 1)
+            var prev = rowPixels[0]
+            var prevG = (Color.red(prev) * 299 + Color.green(prev) * 587 + Color.blue(prev) * 114) / 1000
+            for (x in 1 until width) {
+                val c = rowPixels[x]
+                val g = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+                energy[x] += kotlin.math.abs(g - prevG)
+                prevG = g
+            }
+        }
+
+        val prefix = IntArray(width + 1)
+        for (i in 0 until width) {
+            prefix[i + 1] = prefix[i] + energy[i]
+        }
+        var bestX = 0
+        var bestScore = -1
+        val maxX = max(0, width - roiW)
+        for (x in 0..maxX) {
+            val score = prefix[x + roiW] - prefix[x]
+            if (score > bestScore) {
+                bestScore = score
+                bestX = x
+            }
+        }
+        return bestX
     }
 }

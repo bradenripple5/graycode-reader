@@ -14,6 +14,16 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <ImageView
+        android:id="@+id/bwView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="fitCenter"
+        app:layout_constraintTop_toTopOf="@+id/previewView"
+        app:layout_constraintBottom_toBottomOf="@+id/previewView"
+        app:layout_constraintStart_toStartOf="@+id/previewView"
+        app:layout_constraintEnd_toEndOf="@+id/previewView" />
+
     <com.example.multiupcreader.OverlayView
         android:id="@+id/overlayView"
         android:layout_width="0dp"
@@ -247,6 +257,13 @@
                 android:text="Center Row Bits"
                 android:textColor="#FFFFFF"
                 android:paddingTop="16dp" />
+            <Switch
+                android:id="@+id/showCenterBitsSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Show Center Bits"
+                android:textColor="#FFFFFF"
+                android:checked="false" />
             <TextView
                 android:id="@+id/centerRowBits"
                 android:layout_width="match_parent"
@@ -267,6 +284,13 @@
                 android:text="Compressed Bits"
                 android:textColor="#FFFFFF"
                 android:paddingTop="16dp" />
+            <Switch
+                android:id="@+id/showCompressedBitsSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Show Compressed Bits"
+                android:textColor="#FFFFFF"
+                android:checked="false" />
             <TextView
                 android:id="@+id/compressedBits"
                 android:layout_width="match_parent"
@@ -281,12 +305,28 @@
                 android:text="UPC: -"
                 android:textColor="#FFFFFF" />
 
+            <ImageView
+                android:id="@+id/noUpcImage"
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:visibility="gone"
+                android:paddingTop="8dp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Compressed Rows"
                 android:textColor="#FFFFFF"
                 android:paddingTop="16dp" />
+            <Switch
+                android:id="@+id/showCompressedRowsSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Show Compressed Rows"
+                android:textColor="#FFFFFF"
+                android:checked="false" />
             <TextView
                 android:id="@+id/compressedRows"
                 android:layout_width="match_parent"
