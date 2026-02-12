@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barcode Finder</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #12161b;
+        --accent: #19c37d;
+        --text: #e8edf2;
+        --muted: #9aa6b2;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+        color: var(--text);
+        background: radial-gradient(1200px 800px at 20% -10%, #1a2028 0%, var(--bg) 55%);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      .app {
+        width: min(1000px, 96vw);
+        background: linear-gradient(180deg, #11161d 0%, #0d1117 100%);
+        border: 1px solid #1d2630;
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 18px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button, select {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid #273140;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #0f2b22;
+        border-color: #1f6f4a;
+        color: #c7f7e1;
+      }
+      .viewport {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        background: #0a0f14;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid #1b2430;
+      }
+      video, canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .hud {
+        position: absolute;
+        inset: 12px;
+        border: 2px dashed rgba(25, 195, 125, 0.35);
+        border-radius: 12px;
+        pointer-events: none;
+      }
+      .status {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .checkbox-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .checkbox-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .green { color: #3de288; }
+      .red { color: #ff6b6b; }
+      .status strong { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="header">
+        <div class="title">Barcode Finder</div>
+        <div class="controls">
+          <select id="cameraSelect"></select>
+          <button id="startBtn" class="primary">Start Camera</button>
+          <button id="stopBtn">Stop</button>
+        </div>
+      </div>
+      <div class="status green" id="zxingOutput">ZXing: <strong>—</strong></div>
+      <div class="viewport">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="hud"></div>
+      </div>
+      <div class="status red" id="customOutput">Custom: <strong>—</strong></div>
+      <div class="controls">
+        <div class="checkbox-row">
+          <label><input id="useZXing" type="checkbox" checked /> ZXing</label>
+          <label><input id="useCustom" type="checkbox" checked /> Custom</label>
+        </div>
+        <label>
+          Change count in 100px
+          <input id="countThreshold" type="range" min="0" max="100" value="20" />
+          <span id="countThresholdVal">20</span>
+        </label>
+        <label>
+          Change magnitude
+          <input id="magnitudeThreshold" type="range" min="0" max="765" value="90" />
+          <span id="magnitudeThresholdVal">90</span>
+        </label>
+        <label>
+          Chunk size (px)
+          <input id="chunkSize" type="range" min="20" max="300" value="100" />
+          <span id="chunkSizeVal">100</span>
+        </label>
+        <label>
+          Row similarity %
+          <input id="rowSimilarity" type="range" min="0" max="100" value="60" />
+          <span id="rowSimilarityVal">60</span>
+        </label>
+        <div class="status" id="countReadout">Count in 100px (center): <strong>0</strong></div>
+      </div>
+      <div class="status" id="status">Status: <strong>Idle</strong></div>
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+    <script>
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const overlayCtx = overlay.getContext("2d");
+      const statusEl = document.getElementById("status");
+      const zxingOutputEl = document.getElementById("zxingOutput");
+      const customOutputEl = document.getElementById("customOutput");
+      const cameraSelect = document.getElementById("cameraSelect");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const useZXingEl = document.getElementById("useZXing");
+      const useCustomEl = document.getElementById("useCustom");
+      const countThresholdEl = document.getElementById("countThreshold");
+      const magnitudeThresholdEl = document.getElementById("magnitudeThreshold");
+      const countThresholdVal = document.getElementById("countThresholdVal");
+      const magnitudeThresholdVal = document.getElementById("magnitudeThresholdVal");
+      const chunkSizeEl = document.getElementById("chunkSize");
+      const chunkSizeVal = document.getElementById("chunkSizeVal");
+      const rowSimilarityEl = document.getElementById("rowSimilarity");
+      const rowSimilarityVal = document.getElementById("rowSimilarityVal");
+      const countReadoutEl = document.getElementById("countReadout");
+
+      let stream = null;
+      let rafId = 0;
+      let zxingReader = null;
+      let pendingZXing = false;
+      let lastDecodeTime = 0;
+      const decodeIntervalMs = 300;
+
+      const bandHeight = 50;
+      const colorConsistencyThreshold = 35;
+      const repeatTolerance = 3;
+
+      const frameCanvas = document.createElement("canvas");
+      const frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
+      const vizCanvas = document.createElement("canvas");
+      const vizCtx = vizCanvas.getContext("2d", { willReadFrequently: true });
+
+      let prevBand = null;
+      let meanR = null;
+      let meanG = null;
+      let meanB = null;
+      let meanCount = null;
+
+      const L_CODES = {
+        "0001101": "0",
+        "0011001": "1",
+        "0010011": "2",
+        "0111101": "3",
+        "0100011": "4",
+        "0110001": "5",
+        "0101111": "6",
+        "0111011": "7",
+        "0110111": "8",
+        "0001011": "9"
+      };
+      const R_CODES = {
+        "1110010": "0",
+        "1100110": "1",
+        "1101100": "2",
+        "1000010": "3",
+        "1011100": "4",
+        "1001110": "5",
+        "1010000": "6",
+        "1000100": "7",
+        "1001000": "8",
+        "1110100": "9"
+      };
+
+      function decodeUpcFromModules(bits) {
+        if (bits.length !== 95) return null;
+        const start = bits.slice(0, 3).join("");
+        const middle = bits.slice(45, 50).join("");
+        const end = bits.slice(92, 95).join("");
+        if (start !== "101" || middle !== "01010" || end !== "101") return null;
+
+        let digits = "";
+        for (let i = 0; i < 6; i++) {
+          const seg = bits.slice(3 + i * 7, 3 + (i + 1) * 7).join("");
+          const d = L_CODES[seg];
+          if (d === undefined) return null;
+          digits += d;
+        }
+        for (let i = 0; i < 6; i++) {
+          const seg = bits.slice(50 + i * 7, 50 + (i + 1) * 7).join("");
+          const d = R_CODES[seg];
+          if (d === undefined) return null;
+          digits += d;
+        }
+
+        const nums = digits.split("").map(n => parseInt(n, 10));
+        const oddSum = nums[0] + nums[2] + nums[4] + nums[6] + nums[8] + nums[10];
+        const evenSum = nums[1] + nums[3] + nums[5] + nums[7] + nums[9] + nums[11];
+        const checksum = (oddSum * 3 + evenSum) % 10;
+        if (checksum !== 0) return null;
+        return digits;
+      }
+
+      function compressBits(bits) {
+        if (!bits) return "";
+        const runs = [];
+        let current = bits[0];
+        let len = 1;
+        for (let i = 1; i < bits.length; i++) {
+          if (bits[i] === current) {
+            len++;
+          } else {
+            runs.push({ bit: current, len });
+            current = bits[i];
+            len = 1;
+          }
+        }
+        runs.push({ bit: current, len });
+
+        const zeroRuns = runs.filter(r => r.bit === "0").map(r => r.len);
+        if (!zeroRuns.length) return bits;
+        const minZero = Math.max(1, Math.min(...zeroRuns));
+
+        let compressed = "";
+        for (const run of runs) {
+          const count = Math.max(1, Math.round(run.len / minZero));
+          compressed += run.bit.repeat(count);
+        }
+        return compressed;
+      }
+
+      function decodeUpcFromBitString(bitString) {
+        if (!bitString) return null;
+        for (let i = 0; i + 95 <= bitString.length; i++) {
+          const window = bitString.slice(i, i + 95);
+          const decoded = decodeUpcFromModules(window.split(""));
+          if (decoded) return decoded;
+        }
+        return null;
+      }
+
+      function searchForGuardBars(imageData, width, height) {
+        const y = Math.floor(height / 2);
+        const base = y * width * 4;
+        let sum = 0;
+        for (let x = 0; x < width; x++) {
+          const i = base + x * 4;
+          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+          sum += g;
+        }
+        const threshold = sum / Math.max(1, width);
+
+        const bits = [];
+        const runs = [];
+        let current = null;
+        let runStart = 0;
+        for (let x = 0; x < width; x++) {
+          const i = base + x * 4;
+          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+          const bit = g < threshold ? 1 : 0;
+          bits.push(bit);
+          if (current === null) {
+            current = bit;
+            runStart = x;
+          } else if (bit !== current) {
+            runs.push({ bit: current, start: runStart, end: x - 1, len: x - runStart });
+            current = bit;
+            runStart = x;
+          }
+        }
+        if (current !== null) {
+          runs.push({ bit: current, start: runStart, end: width - 1, len: width - runStart });
+        }
+
+        const bitString = bits.join("");
+        const modules = compressBits(bitString);
+        const zeroRuns = runs.filter(r => r.bit === 0).map(r => r.len);
+        if (!zeroRuns.length) return [];
+        const baseModule = Math.max(1, Math.min(...zeroRuns));
+        const modulePositions = [];
+        for (const run of runs) {
+          const count = Math.max(1, Math.round(run.len / baseModule));
+          for (let i = 0; i < count; i++) {
+            const xPos = run.start + baseModule * (i + 0.5);
+            modulePositions.push(xPos);
+          }
+        }
+
+        const hits = [];
+        const patterns = [
+          { bits: "101", type: "guard" },
+          { bits: "01010", type: "center" }
+        ];
+        for (const p of patterns) {
+          for (let i = 0; i + p.bits.length <= modules.length; i++) {
+            if (modules.slice(i, i + p.bits.length) === p.bits) {
+              const mid = i + (p.bits.length - 1) / 2;
+              const idx = Math.max(0, Math.min(modulePositions.length - 1, Math.round(mid)));
+              hits.push({ x: modulePositions[idx], type: p.type });
+            }
+          }
+        }
+        return hits;
+      }
+
+      function detectBarcodeRow(imageData, width, height) {
+        const y = Math.floor(height / 2);
+        const base = y * width * 4;
+        let sum = 0;
+        for (let x = 0; x < width; x++) {
+          const i = base + x * 4;
+          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+          sum += g;
+        }
+        const threshold = sum / Math.max(1, width);
+
+        const bits = [];
+        for (let x = 0; x < width; x++) {
+          const i = base + x * 4;
+          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+          bits.push(g < threshold ? 1 : 0);
+        }
+        const bitString = bits.join("");
+        const compressed = compressBits(bitString);
+        return decodeUpcFromBitString(compressed);
+      }
+
+      function ensureZXing() {
+        if (!zxingReader && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+          zxingReader = new window.ZXing.BrowserMultiFormatReader();
+        }
+      }
+
+      function setStatus(text) {
+        statusEl.innerHTML = "Status: <strong>" + text + "</strong>";
+      }
+
+      function pickDefaultCameraId(cams) {
+        const byLabel = cams.find(cam => {
+          const label = (cam.label || "").toLowerCase();
+          return label.includes("back") || label.includes("rear") || label.includes("environment");
+        });
+        return (byLabel && byLabel.deviceId) || (cams[0] && cams[0].deviceId) || "";
+      }
+
+      async function listCameras() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        cameraSelect.innerHTML = "";
+        const cams = devices.filter(d => d.kind === "videoinput");
+        cams.forEach((cam, i) => {
+          const opt = document.createElement("option");
+          opt.value = cam.deviceId;
+          opt.textContent = cam.label || "Camera " + (i + 1);
+          cameraSelect.appendChild(opt);
+        });
+        if (!cams.length) {
+          const opt = document.createElement("option");
+          opt.textContent = "No camera found";
+          cameraSelect.appendChild(opt);
+        } else {
+          cameraSelect.value = pickDefaultCameraId(cams);
+        }
+      }
+
+      async function startCamera() {
+        try {
+          if (stream) stopCamera();
+          const deviceId = cameraSelect.value;
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: deviceId
+              ? { deviceId: { exact: deviceId } }
+              : { facingMode: { ideal: "environment" } },
+            audio: false
+          });
+          video.srcObject = stream;
+          setStatus("Camera running");
+          resizeOverlay();
+          startProcessing();
+        } catch (err) {
+          console.error(err);
+          setStatus("Camera error: " + err.message);
+        }
+      }
+
+      function stopCamera() {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        video.srcObject = null;
+        setStatus("Stopped");
+      }
+
+      function resizeOverlay() {
+        const rect = video.getBoundingClientRect();
+        overlay.width = Math.max(1, Math.floor(rect.width));
+        overlay.height = Math.max(1, Math.floor(rect.height));
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      }
+
+      function resetBuffers(width, height) {
+        frameCanvas.width = width;
+        frameCanvas.height = height;
+        vizCanvas.width = width;
+        vizCanvas.height = height;
+        prevBand = null;
+        const bandPixels = width * bandHeight;
+        meanR = new Float32Array(bandPixels);
+        meanG = new Float32Array(bandPixels);
+        meanB = new Float32Array(bandPixels);
+        meanCount = new Uint32Array(bandPixels);
+      }
+
+      function startProcessing() {
+        if (rafId) cancelAnimationFrame(rafId);
+        const loop = () => {
+          rafId = requestAnimationFrame(loop);
+          if (!video.videoWidth || !video.videoHeight) return;
+          if (frameCanvas.width !== video.videoWidth || frameCanvas.height !== video.videoHeight) {
+            resetBuffers(video.videoWidth, video.videoHeight);
+          }
+
+          const w = frameCanvas.width;
+          const h = frameCanvas.height;
+          const y0 = Math.max(0, Math.floor((h - bandHeight) / 2));
+
+          frameCtx.drawImage(video, 0, 0, w, h);
+          const band = frameCtx.getImageData(0, y0, w, bandHeight);
+          const data = band.data;
+          if (!prevBand || prevBand.length !== data.length) {
+            prevBand = new Uint8ClampedArray(data);
+            return;
+          }
+
+          const magThreshold = Number(magnitudeThresholdEl.value);
+          const countThreshold = Number(countThresholdEl.value);
+          const chunkSize = Number(chunkSizeEl.value);
+          const rowSimilarityThreshold = Number(rowSimilarityEl.value);
+          const scaledThreshold = (countThreshold * chunkSize) / 100;
+          const bypassAll = magThreshold === 0 && countThreshold === 0 && rowSimilarityThreshold === 0;
+          const bandPixels = w * bandHeight;
+          const changedMask = new Uint8Array(bandPixels);
+
+          for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const rp = prevBand[i];
+            const gp = prevBand[i + 1];
+            const bp = prevBand[i + 2];
+            const diff = Math.abs(r - rp) + Math.abs(g - gp) + Math.abs(b - bp);
+              if (diff >= magThreshold) {
+                changedMask[p] = 1;
+                const count = meanCount[p];
+                if (count === 0) {
+                  meanR[p] = r;
+                meanG[p] = g;
+                meanB[p] = b;
+                meanCount[p] = 1;
+              } else {
+                const dr = r - meanR[p];
+                const dg = g - meanG[p];
+                const db = b - meanB[p];
+                const dist = Math.abs(dr) + Math.abs(dg) + Math.abs(db);
+                if (dist <= colorConsistencyThreshold) {
+                  const nextCount = count + 1;
+                  meanR[p] += dr / nextCount;
+                  meanG[p] += dg / nextCount;
+                  meanB[p] += db / nextCount;
+                  meanCount[p] = nextCount;
+                }
+              }
+            }
+          }
+
+          const half = Math.floor(chunkSize / 2);
+          const transitionsByRow = new Uint16Array(bandHeight * w);
+          for (let y = 0; y < bandHeight; y++) {
+            const rowOffset = y * w * 4;
+            let lastR = data[rowOffset];
+            let lastG = data[rowOffset + 1];
+            let lastB = data[rowOffset + 2];
+            for (let x = 1; x < w; x++) {
+              const i = rowOffset + x * 4;
+              const dr = Math.abs(data[i] - lastR);
+              const dg = Math.abs(data[i + 1] - lastG);
+              const db = Math.abs(data[i + 2] - lastB);
+              const edge = dr + dg + db >= magThreshold;
+              const idx = y * w + x;
+              transitionsByRow[idx] = transitionsByRow[idx - 1] + (edge ? 1 : 0);
+              lastR = data[i];
+              lastG = data[i + 1];
+              lastB = data[i + 2];
+            }
+          }
+
+          const windowTransitions = new Uint16Array(bandHeight * w);
+          for (let y = 0; y < bandHeight; y++) {
+            const rowBase = y * w;
+            for (let x = 0; x < w; x++) {
+              const left = Math.max(0, x - half);
+              const right = Math.min(w - 1, x + half);
+              const rightVal = transitionsByRow[rowBase + right];
+              const leftVal = left > 0 ? transitionsByRow[rowBase + left - 1] : 0;
+              windowTransitions[rowBase + x] = rightVal - leftVal;
+            }
+          }
+
+          const similarPctByX = new Uint8Array(w);
+          const maxPairs = Math.max(1, bandHeight - 1);
+          for (let x = 0; x < w; x++) {
+            let similarCount = 0;
+            for (let y = 0; y < bandHeight - 1; y++) {
+              const i1 = (y * w + x) * 4;
+              const i2 = ((y + 1) * w + x) * 4;
+              const g1 = data[i1] * 0.299 + data[i1 + 1] * 0.587 + data[i1 + 2] * 0.114;
+              const g2 = data[i2] * 0.299 + data[i2 + 1] * 0.587 + data[i2 + 2] * 0.114;
+              const diff = Math.abs(g1 - g2);
+              if (diff <= Math.min(255, magThreshold)) similarCount++;
+            }
+            similarPctByX[x] = Math.round((similarCount / maxPairs) * 100);
+          }
+
+          const qualifies = new Uint8Array(w);
+          const midRow = Math.floor(bandHeight / 2);
+          for (let x = 0; x < w; x++) {
+            const tMid = windowTransitions[midRow * w + x];
+            if (tMid >= scaledThreshold && similarPctByX[x] >= rowSimilarityThreshold) {
+              qualifies[x] = 1;
+            }
+          }
+
+          const highlightX = new Uint8Array(w);
+          if (bypassAll) {
+            highlightX.fill(1);
+          } else {
+            for (let x = 0; x < w; x++) {
+              if (!qualifies[x]) continue;
+              const left = Math.max(0, x - half);
+              const right = Math.min(w - 1, x + half);
+              for (let xi = left; xi <= right; xi++) {
+                highlightX[xi] = 1;
+              }
+            }
+          }
+
+          const centerX = Math.floor(w / 2);
+          const centerCount = windowTransitions[midRow * w + centerX] || 0;
+          countReadoutEl.innerHTML = "Count in " + chunkSize + "px (center): <strong>" + centerCount + "</strong>";
+
+          const chunks = [];
+          let inChunk = false;
+          let chunkStart = 0;
+          for (let x = 0; x < w; x++) {
+            if (highlightX[x] && !inChunk) {
+              inChunk = true;
+              chunkStart = x;
+            } else if (!highlightX[x] && inChunk) {
+              chunks.push({ xStart: chunkStart, xEnd: x - 1 });
+              inChunk = false;
+            }
+          }
+          if (inChunk) chunks.push({ xStart: chunkStart, xEnd: w - 1 });
+
+          const now = performance.now();
+          if (now - lastDecodeTime >= decodeIntervalMs) {
+            lastDecodeTime = now;
+
+            if (useCustomEl.checked) {
+              let customValue = null;
+              for (const chunk of chunks) {
+                const width = Math.max(1, chunk.xEnd - chunk.xStart + 1);
+                const img = frameCtx.getImageData(chunk.xStart, y0, width, bandHeight);
+                const decoded = detectBarcodeRow(img.data, width, bandHeight);
+                if (decoded) {
+                  customValue = decoded;
+                  break;
+                }
+              }
+              customOutputEl.innerHTML = "Custom: <strong>" + (customValue || "—") + "</strong>";
+            } else {
+              customOutputEl.innerHTML = "Custom: <strong>—</strong>";
+            }
+
+            if (useZXingEl.checked) {
+              ensureZXing();
+              if (!zxingReader || pendingZXing) {
+                if (!zxingReader) {
+                  zxingOutputEl.innerHTML = "ZXing: <strong>—</strong>";
+                }
+              } else {
+                pendingZXing = true;
+                (async () => {
+                  let zxingValue = null;
+                  for (const chunk of chunks) {
+                    const width = Math.max(1, chunk.xEnd - chunk.xStart + 1);
+                    const img = frameCtx.getImageData(chunk.xStart, y0, width, bandHeight);
+                    try {
+                      const result = await zxingReader.decodeFromImageData(img);
+                      if (result && result.text) {
+                        zxingValue = result.text;
+                        break;
+                      }
+                    } catch (_) {}
+                  }
+                  if (useZXingEl.checked) {
+                    zxingOutputEl.innerHTML = "ZXing: <strong>" + (zxingValue || "—") + "</strong>";
+                  }
+                  pendingZXing = false;
+                })();
+              }
+            } else {
+              zxingOutputEl.innerHTML = "ZXing: <strong>—</strong>";
+            }
+          }
+
+          const viz = vizCtx.createImageData(w, h);
+          const vizData = viz.data;
+          for (let y = 0; y < bandHeight; y++) {
+            for (let x = 0; x < w; x++) {
+              if (!highlightX[x]) continue;
+              const vi = ((y0 + y) * w + x) * 4;
+              vizData[vi] = 0;
+              vizData[vi + 1] = 255;
+              vizData[vi + 2] = 0;
+              vizData[vi + 3] = 180;
+            }
+          }
+
+          vizCtx.putImageData(viz, 0, 0);
+          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+          overlayCtx.drawImage(vizCanvas, 0, 0, overlay.width, overlay.height);
+
+          const guardHits = searchForGuardBars(data, w, bandHeight);
+          if (guardHits.length) {
+            const scaleX = overlay.width / w;
+            const scaleY = overlay.height / h;
+            const yCenter = Math.max(4, y0 * scaleY - 6);
+            overlayCtx.strokeStyle = "rgba(255, 220, 0, 0.95)";
+            overlayCtx.lineWidth = 2;
+            for (const hit of guardHits) {
+              const x = hit.x * scaleX;
+              overlayCtx.beginPath();
+              overlayCtx.moveTo(x - 6, yCenter);
+              overlayCtx.lineTo(x + 6, yCenter);
+              overlayCtx.moveTo(x, yCenter - 6);
+              overlayCtx.lineTo(x, yCenter + 6);
+              overlayCtx.stroke();
+            }
+          }
+          prevBand.set(data);
+        };
+        loop();
+      }
+
+      startBtn.addEventListener("click", startCamera);
+      stopBtn.addEventListener("click", stopCamera);
+      window.addEventListener("resize", resizeOverlay);
+      countThresholdEl.addEventListener("input", () => {
+        countThresholdVal.textContent = countThresholdEl.value;
+      });
+      magnitudeThresholdEl.addEventListener("input", () => {
+        magnitudeThresholdVal.textContent = magnitudeThresholdEl.value;
+      });
+      chunkSizeEl.addEventListener("input", () => {
+        chunkSizeVal.textContent = chunkSizeEl.value;
+      });
+      rowSimilarityEl.addEventListener("input", () => {
+        rowSimilarityVal.textContent = rowSimilarityEl.value;
+      });
+
+      navigator.mediaDevices.addEventListener("devicechange", listCameras);
+      listCameras()
+        .then(() => startCamera())
+        .catch(() => setStatus("No camera access"));
+    </script>
+  </body>
+</html>

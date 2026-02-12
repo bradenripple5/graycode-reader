@@ -116,40 +116,35 @@
           <button id="stopBtn">Stop</button>
         </div>
       </div>
+
       <div class="status green" id="zxingOutput">ZXing: <strong>—</strong></div>
+
       <div class="viewport">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
         <div class="hud"></div>
       </div>
+
       <div class="status red" id="customOutput">Custom: <strong>—</strong></div>
+
       <div class="controls">
         <div class="checkbox-row">
           <label><input id="useZXing" type="checkbox" checked /> ZXing</label>
           <label><input id="useCustom" type="checkbox" checked /> Custom</label>
         </div>
         <label>
-          Change count in 100px
-          <input id="countThreshold" type="range" min="0" max="100" value="20" />
-          <span id="countThresholdVal">20</span>
+          Rows to compare
+          <input id="rowCompareCount" type="range" min="2" max="30" value="10" />
+          <span id="rowCompareCountVal">10</span>
         </label>
         <label>
-          Change magnitude
-          <input id="magnitudeThreshold" type="range" min="0" max="765" value="90" />
-          <span id="magnitudeThresholdVal">90</span>
+          Intensity threshold
+          <input id="intensityThreshold" type="range" min="0" max="255" value="128" />
+          <span id="intensityThresholdVal">128</span>
         </label>
-        <label>
-          Chunk size (px)
-          <input id="chunkSize" type="range" min="20" max="300" value="100" />
-          <span id="chunkSizeVal">100</span>
-        </label>
-        <label>
-          Row similarity %
-          <input id="rowSimilarity" type="range" min="0" max="100" value="60" />
-          <span id="rowSimilarityVal">60</span>
-        </label>
-        <div class="status" id="countReadout">Count in 100px (center): <strong>0</strong></div>
+        <div class="status" id="countReadout">Matching rows: <strong>—</strong></div>
       </div>
+
       <div class="status" id="status">Status: <strong>Idle</strong></div>
     </div>
 
@@ -166,14 +161,10 @@
       const stopBtn = document.getElementById("stopBtn");
       const useZXingEl = document.getElementById("useZXing");
       const useCustomEl = document.getElementById("useCustom");
-      const countThresholdEl = document.getElementById("countThreshold");
-      const magnitudeThresholdEl = document.getElementById("magnitudeThreshold");
-      const countThresholdVal = document.getElementById("countThresholdVal");
-      const magnitudeThresholdVal = document.getElementById("magnitudeThresholdVal");
-      const chunkSizeEl = document.getElementById("chunkSize");
-      const chunkSizeVal = document.getElementById("chunkSizeVal");
-      const rowSimilarityEl = document.getElementById("rowSimilarity");
-      const rowSimilarityVal = document.getElementById("rowSimilarityVal");
+      const rowCompareCountEl = document.getElementById("rowCompareCount");
+      const rowCompareCountVal = document.getElementById("rowCompareCountVal");
+      const intensityThresholdEl = document.getElementById("intensityThreshold");
+      const intensityThresholdVal = document.getElementById("intensityThresholdVal");
       const countReadoutEl = document.getElementById("countReadout");
 
       let stream = null;
@@ -184,19 +175,12 @@
       const decodeIntervalMs = 300;
 
       const bandHeight = 50;
-      const colorConsistencyThreshold = 35;
-      const repeatTolerance = 3;
-
       const frameCanvas = document.createElement("canvas");
       const frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
       const vizCanvas = document.createElement("canvas");
       const vizCtx = vizCanvas.getContext("2d", { willReadFrequently: true });
 
       let prevBand = null;
-      let meanR = null;
-      let meanG = null;
-      let meanB = null;
-      let meanCount = null;
 
       const L_CODES = {
         "0001101": "0",
@@ -244,74 +228,174 @@
           digits += d;
         }
 
+        // UPC-A checksum: (3*sum odd positions + sum even positions) % 10 must be 0
         const nums = digits.split("").map(n => parseInt(n, 10));
         const oddSum = nums[0] + nums[2] + nums[4] + nums[6] + nums[8] + nums[10];
         const evenSum = nums[1] + nums[3] + nums[5] + nums[7] + nums[9] + nums[11];
         const checksum = (oddSum * 3 + evenSum) % 10;
         if (checksum !== 0) return null;
+
         return digits;
       }
 
-      function compressBits(bits) {
-        if (!bits) return "";
-        const runs = [];
-        let current = bits[0];
-        let len = 1;
-        for (let i = 1; i < bits.length; i++) {
-          if (bits[i] === current) {
-            len++;
-          } else {
-            runs.push({ bit: current, len });
-            current = bits[i];
-            len = 1;
-          }
-        }
-        runs.push({ bit: current, len });
+      // ===== New chunk-based UPC finder helpers =====
 
-        const zeroRuns = runs.filter(r => r.bit === "0").map(r => r.len);
-        if (!zeroRuns.length) return bits;
-        const minZero = Math.max(1, Math.min(...zeroRuns));
-
-        let compressed = "";
-        for (const run of runs) {
-          const count = Math.max(1, Math.round(run.len / minZero));
-          compressed += run.bit.repeat(count);
-        }
-        return compressed;
+      function grayscaleAt(data, idx) {
+        return data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
       }
 
-      function decodeUpcFromBitString(bitString) {
-        if (!bitString) return null;
-        for (let i = 0; i + 95 <= bitString.length; i++) {
-          const window = bitString.slice(i, i + 95);
+      function buildModulesForRow(imageData, width, y, x0 = 0, x1 = width, threshold = 128) {
+        const runs = [];
+        let current = null;
+        let runStart = x0;
+
+        for (let x = x0; x < x1; x++) {
+          const i = (y * width + x) * 4;
+          const g = grayscaleAt(imageData, i);
+          const bit = g < threshold ? 1 : 0;
+
+          if (current === null) {
+            current = bit;
+            runStart = x;
+          } else if (bit !== current) {
+            runs.push({ bit: current, start: runStart, end: x - 1, len: x - runStart });
+            current = bit;
+            runStart = x;
+          }
+        }
+        if (current !== null) {
+          runs.push({ bit: current, start: runStart, end: x1 - 1, len: x1 - runStart });
+        }
+
+        const lens = runs.map(r => r.len).filter(l => l > 0).sort((a, b) => a - b);
+        if (lens.length < 10) return null;
+
+        const k = Math.min(12, lens.length);
+        let baseModule = 0;
+        for (let i = 0; i < k; i++) baseModule += lens[i];
+        baseModule = Math.max(1, Math.round(baseModule / k));
+
+        let modules = "";
+        const moduleX = [];
+
+        for (const r of runs) {
+          const count = Math.max(1, Math.round(r.len / baseModule));
+          for (let j = 0; j < count; j++) {
+            modules += (r.bit ? "1" : "0");
+            const xCenter = r.start + baseModule * (j + 0.5);
+            moduleX.push(xCenter);
+          }
+        }
+
+        return { modules, moduleX, baseModule, x0, x1, threshold };
+      }
+
+      function buildBitsForRow(imageData, width, y, threshold) {
+        const bits = new Uint8Array(width);
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const g = grayscaleAt(imageData, i);
+          bits[x] = g < threshold ? 1 : 0;
+        }
+        return bits;
+      }
+
+      function findBestRowMatchSegment(imageData, width, height, rowsToCompare, threshold) {
+        const rows = Math.max(2, Math.min(rowsToCompare, height));
+        let best = null;
+        for (let y = 0; y + rows <= height; y++) {
+          const rowBits = [];
+          for (let r = 0; r < rows; r++) {
+            rowBits.push(buildBitsForRow(imageData, width, y + r, threshold));
+          }
+
+          let inSeg = false;
+          let segStart = 0;
+          for (let x = 0; x < width; x++) {
+            const ref = rowBits[0][x];
+            let match = true;
+            for (let r = 1; r < rows; r++) {
+              if (rowBits[r][x] !== ref) { match = false; break; }
+            }
+
+            if (match && !inSeg) {
+              inSeg = true;
+              segStart = x;
+            } else if (!match && inSeg) {
+              const segEnd = x - 1;
+              const len = segEnd - segStart + 1;
+              if (!best || len > best.len) {
+                best = { xStart: segStart, xEnd: segEnd, yStart: y, rows, len };
+              }
+              inSeg = false;
+            }
+          }
+          if (inSeg) {
+            const segEnd = width - 1;
+            const len = segEnd - segStart + 1;
+            if (!best || len > best.len) {
+              best = { xStart: segStart, xEnd: segEnd, yStart: y, rows, len };
+            }
+          }
+        }
+        return best;
+      }
+
+      function findUPCInModules(modules, moduleX, baseModule) {
+        const N = modules.length;
+        if (N < 95) return null;
+
+        for (let i = 0; i + 95 <= N; i++) {
+          const window = modules.slice(i, i + 95);
           const decoded = decodeUpcFromModules(window.split(""));
-          if (decoded) return decoded;
+          if (decoded) {
+            const leftCenter = moduleX[i];
+            const rightCenter = moduleX[i + 94];
+            const xStart = leftCenter - baseModule * 0.5;
+            const xEnd = rightCenter + baseModule * 0.5;
+            return { code: decoded, xStart, xEnd, i };
+          }
         }
         return null;
       }
 
-      function detectBarcodeRow(imageData, width, height) {
-        const y = Math.floor(height / 2);
-        const base = y * width * 4;
-        let sum = 0;
-        for (let x = 0; x < width; x++) {
-          const i = base + x * 4;
-          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
-          sum += g;
+      function detectUPCInChunk(imageData, width, height, threshold) {
+        const mid = Math.floor(height / 2);
+        const offsets = [0, -2, 2, -5, 5, -9, 9, -14, 14];
+        const rows = [];
+        for (const o of offsets) {
+          const y = mid + o;
+          if (y >= 0 && y < height) rows.push(y);
         }
-        const threshold = sum / Math.max(1, width);
 
-        const bits = [];
-        for (let x = 0; x < width; x++) {
-          const i = base + x * 4;
-          const g = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
-          bits.push(g < threshold ? 1 : 0);
+        let best = null;
+
+        for (const y of rows) {
+          const built = buildModulesForRow(imageData, width, y, 0, width, threshold);
+          if (!built) continue;
+
+          const hit = findUPCInModules(built.modules, built.moduleX, built.baseModule);
+          if (!hit) continue;
+
+          const span = hit.xEnd - hit.xStart;
+          const score = span + built.baseModule * 10;
+
+          if (!best || score > best.score) {
+            best = {
+              code: hit.code,
+              xStart: Math.max(0, hit.xStart),
+              xEnd: Math.min(width - 1, hit.xEnd),
+              yStart: Math.max(0, y - Math.floor(height * 0.35)),
+              yEnd: Math.min(height - 1, y + Math.floor(height * 0.35)),
+              score
+            };
+          }
         }
-        const bitString = bits.join("");
-        const compressed = compressBits(bitString);
-        return decodeUpcFromBitString(compressed);
+
+        return best;
       }
 
+      // ===== ZXing wrapper =====
       function ensureZXing() {
         if (!zxingReader && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
           zxingReader = new window.ZXing.BrowserMultiFormatReader();
@@ -395,18 +479,15 @@
         vizCanvas.width = width;
         vizCanvas.height = height;
         prevBand = null;
-        const bandPixels = width * bandHeight;
-        meanR = new Float32Array(bandPixels);
-        meanG = new Float32Array(bandPixels);
-        meanB = new Float32Array(bandPixels);
-        meanCount = new Uint32Array(bandPixels);
       }
 
       function startProcessing() {
         if (rafId) cancelAnimationFrame(rafId);
+
         const loop = () => {
           rafId = requestAnimationFrame(loop);
           if (!video.videoWidth || !video.videoHeight) return;
+
           if (frameCanvas.width !== video.videoWidth || frameCanvas.height !== video.videoHeight) {
             resetBuffers(video.videoWidth, video.videoHeight);
           }
@@ -418,180 +499,106 @@
           frameCtx.drawImage(video, 0, 0, w, h);
           const band = frameCtx.getImageData(0, y0, w, bandHeight);
           const data = band.data;
+
           if (!prevBand || prevBand.length !== data.length) {
             prevBand = new Uint8ClampedArray(data);
             return;
           }
 
-          const magThreshold = Number(magnitudeThresholdEl.value);
-          const countThreshold = Number(countThresholdEl.value);
-          const chunkSize = Number(chunkSizeEl.value);
-          const rowSimilarityThreshold = Number(rowSimilarityEl.value);
-          const scaledThreshold = (countThreshold * chunkSize) / 100;
-          const bypassAll = magThreshold === 0 && countThreshold === 0 && rowSimilarityThreshold === 0;
-          const bandPixels = w * bandHeight;
-          const changedMask = new Uint8Array(bandPixels);
-
-          for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const rp = prevBand[i];
-            const gp = prevBand[i + 1];
-            const bp = prevBand[i + 2];
-            const diff = Math.abs(r - rp) + Math.abs(g - gp) + Math.abs(b - bp);
-              if (diff >= magThreshold) {
-                changedMask[p] = 1;
-                const count = meanCount[p];
-                if (count === 0) {
-                  meanR[p] = r;
-                meanG[p] = g;
-                meanB[p] = b;
-                meanCount[p] = 1;
-              } else {
-                const dr = r - meanR[p];
-                const dg = g - meanG[p];
-                const db = b - meanB[p];
-                const dist = Math.abs(dr) + Math.abs(dg) + Math.abs(db);
-                if (dist <= colorConsistencyThreshold) {
-                  const nextCount = count + 1;
-                  meanR[p] += dr / nextCount;
-                  meanG[p] += dg / nextCount;
-                  meanB[p] += db / nextCount;
-                  meanCount[p] = nextCount;
-                }
-              }
-            }
-          }
-
-          const half = Math.floor(chunkSize / 2);
-          const transitionsByRow = new Uint16Array(bandHeight * w);
-          for (let y = 0; y < bandHeight; y++) {
-            const rowOffset = y * w * 4;
-            let lastR = data[rowOffset];
-            let lastG = data[rowOffset + 1];
-            let lastB = data[rowOffset + 2];
-            for (let x = 1; x < w; x++) {
-              const i = rowOffset + x * 4;
-              const dr = Math.abs(data[i] - lastR);
-              const dg = Math.abs(data[i + 1] - lastG);
-              const db = Math.abs(data[i + 2] - lastB);
-              const edge = dr + dg + db >= magThreshold;
-              const idx = y * w + x;
-              transitionsByRow[idx] = transitionsByRow[idx - 1] + (edge ? 1 : 0);
-              lastR = data[i];
-              lastG = data[i + 1];
-              lastB = data[i + 2];
-            }
-          }
-
-          const windowTransitions = new Uint16Array(bandHeight * w);
-          for (let y = 0; y < bandHeight; y++) {
-            const rowBase = y * w;
-            for (let x = 0; x < w; x++) {
-              const left = Math.max(0, x - half);
-              const right = Math.min(w - 1, x + half);
-              const rightVal = transitionsByRow[rowBase + right];
-              const leftVal = left > 0 ? transitionsByRow[rowBase + left - 1] : 0;
-              windowTransitions[rowBase + x] = rightVal - leftVal;
-            }
-          }
-
-          const similarPctByX = new Uint8Array(w);
-          const maxPairs = Math.max(1, bandHeight - 1);
-          for (let x = 0; x < w; x++) {
-            let similarCount = 0;
-            for (let y = 0; y < bandHeight - 1; y++) {
-              const i1 = (y * w + x) * 4;
-              const i2 = ((y + 1) * w + x) * 4;
-              const g1 = data[i1] * 0.299 + data[i1 + 1] * 0.587 + data[i1 + 2] * 0.114;
-              const g2 = data[i2] * 0.299 + data[i2 + 1] * 0.587 + data[i2 + 2] * 0.114;
-              const diff = Math.abs(g1 - g2);
-              if (diff <= Math.min(255, magThreshold)) similarCount++;
-            }
-            similarPctByX[x] = Math.round((similarCount / maxPairs) * 100);
-          }
-
-          const qualifies = new Uint8Array(w);
-          const midRow = Math.floor(bandHeight / 2);
-          for (let x = 0; x < w; x++) {
-            const tMid = windowTransitions[midRow * w + x];
-            if (tMid >= scaledThreshold && similarPctByX[x] >= rowSimilarityThreshold) {
-              qualifies[x] = 1;
-            }
-          }
-
+          const rowsToCompare = Number(rowCompareCountEl.value);
+          const intensityThreshold = Number(intensityThresholdEl.value);
           const highlightX = new Uint8Array(w);
-          if (bypassAll) {
-            highlightX.fill(1);
-          } else {
+          const bestSeg = findBestRowMatchSegment(data, w, bandHeight, rowsToCompare, intensityThreshold);
+          if (bestSeg) {
+            for (let x = bestSeg.xStart; x <= bestSeg.xEnd; x++) highlightX[x] = 1;
+          }
+
+          countReadoutEl.innerHTML =
+            "Matching rows: <strong>" + (bestSeg ? bestSeg.rows + " / " + rowsToCompare : "—") + "</strong>";
+
+          const adjustedChunks = bestSeg
+            ? [{ xStart: bestSeg.xStart, xEnd: bestSeg.xEnd }]
+            : [];
+
+          // Visualization: green overlay for candidate x-ranges
+          const viz = vizCtx.createImageData(w, h);
+          const vizData = viz.data;
+          for (let y = 0; y < bandHeight; y++) {
             for (let x = 0; x < w; x++) {
-              if (!qualifies[x]) continue;
-              const left = Math.max(0, x - half);
-              const right = Math.min(w - 1, x + half);
-              for (let xi = left; xi <= right; xi++) {
-                highlightX[xi] = 1;
-              }
+              if (!highlightX[x]) continue;
+              const vi = ((y0 + y) * w + x) * 4;
+              vizData[vi] = 0;
+              vizData[vi + 1] = 255;
+              vizData[vi + 2] = 0;
+              vizData[vi + 3] = 180;
             }
           }
+          vizCtx.putImageData(viz, 0, 0);
 
-          const centerX = Math.floor(w / 2);
-          const centerCount = windowTransitions[midRow * w + centerX] || 0;
-          countReadoutEl.innerHTML = "Count in " + chunkSize + "px (center): <strong>" + centerCount + "</strong>";
+          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+          overlayCtx.drawImage(vizCanvas, 0, 0, overlay.width, overlay.height);
 
-          const chunks = [];
-          let inChunk = false;
-          let chunkStart = 0;
-          for (let x = 0; x < w; x++) {
-            if (highlightX[x] && !inChunk) {
-              inChunk = true;
-              chunkStart = x;
-            } else if (!highlightX[x] && inChunk) {
-              chunks.push({ xStart: chunkStart, xEnd: x - 1 });
-              inChunk = false;
-            }
-          }
-          if (inChunk) chunks.push({ xStart: chunkStart, xEnd: w - 1 });
-
+          // Decode at interval
           const now = performance.now();
           if (now - lastDecodeTime >= decodeIntervalMs) {
             lastDecodeTime = now;
 
-            if (useCustomEl.checked) {
-              let customValue = null;
-              for (const chunk of chunks) {
-                const width = Math.max(1, chunk.xEnd - chunk.xStart + 1);
-                const img = frameCtx.getImageData(chunk.xStart, y0, width, bandHeight);
-                const decoded = detectBarcodeRow(img.data, width, bandHeight);
-                if (decoded) {
-                  customValue = decoded;
-                  break;
+            // --- CUSTOM (chunk-based UPC) ---
+            if (useCustomEl.checked && adjustedChunks.length) {
+              let bestHit = null;
+              let bestChunk = null;
+
+              for (const chunk of adjustedChunks) {
+                const cw = Math.max(1, chunk.xEnd - chunk.xStart + 1);
+                const img = frameCtx.getImageData(chunk.xStart, y0, cw, bandHeight);
+                const hit = detectUPCInChunk(img.data, cw, bandHeight, intensityThreshold);
+
+                if (hit) {
+                  bestHit = hit;
+                  bestChunk = chunk;
+                  break; // first good hit; remove to search all chunks
                 }
               }
-              customOutputEl.innerHTML = "Custom: <strong>" + (customValue || "—") + "</strong>";
+
+              if (bestHit && bestChunk) {
+                customOutputEl.innerHTML = "Custom: <strong>" + bestHit.code + "</strong>";
+
+                // draw tight rectangle around UPC window inside the chunk
+                const scaleX = overlay.width / frameCanvas.width;
+                const scaleY = overlay.height / frameCanvas.height;
+
+                const gx0 = (bestChunk.xStart + bestHit.xStart) * scaleX;
+                const gx1 = (bestChunk.xStart + bestHit.xEnd) * scaleX;
+                const gy0 = (y0 + bestHit.yStart) * scaleY;
+                const gy1 = (y0 + bestHit.yEnd) * scaleY;
+
+                overlayCtx.save();
+                overlayCtx.strokeStyle = "rgba(255, 220, 0, 0.95)";
+                overlayCtx.lineWidth = 3;
+                overlayCtx.strokeRect(gx0, gy0, Math.max(1, gx1 - gx0), Math.max(1, gy1 - gy0));
+                overlayCtx.restore();
+              } else {
+                customOutputEl.innerHTML = "Custom: <strong>—</strong>";
+              }
             } else {
               customOutputEl.innerHTML = "Custom: <strong>—</strong>";
             }
 
-            if (useZXingEl.checked) {
+            // --- ZXING ---
+            if (useZXingEl.checked && adjustedChunks.length) {
               ensureZXing();
               if (!zxingReader || pendingZXing) {
-                if (!zxingReader) {
-                  zxingOutputEl.innerHTML = "ZXing: <strong>—</strong>";
-                }
+                if (!zxingReader) zxingOutputEl.innerHTML = "ZXing: <strong>—</strong>";
               } else {
                 pendingZXing = true;
                 (async () => {
                   let zxingValue = null;
-                  for (const chunk of chunks) {
-                    const width = Math.max(1, chunk.xEnd - chunk.xStart + 1);
-                    const img = frameCtx.getImageData(chunk.xStart, y0, width, bandHeight);
+                  for (const chunk of adjustedChunks) {
+                    const cw = Math.max(1, chunk.xEnd - chunk.xStart + 1);
+                    const img = frameCtx.getImageData(chunk.xStart, y0, cw, bandHeight);
                     try {
                       const result = await zxingReader.decodeFromImageData(img);
-                      if (result && result.text) {
-                        zxingValue = result.text;
-                        break;
-                      }
+                      if (result && result.text) { zxingValue = result.text; break; }
                     } catch (_) {}
                   }
                   if (useZXingEl.checked) {
@@ -605,44 +612,25 @@
             }
           }
 
-          const viz = vizCtx.createImageData(w, h);
-          const vizData = viz.data;
-          for (let y = 0; y < bandHeight; y++) {
-            for (let x = 0; x < w; x++) {
-              if (!highlightX[x]) continue;
-              const vi = ((y0 + y) * w + x) * 4;
-              vizData[vi] = 0;
-              vizData[vi + 1] = 255;
-              vizData[vi + 2] = 0;
-              vizData[vi + 3] = 180;
-            }
-          }
-
-          vizCtx.putImageData(viz, 0, 0);
-          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-          overlayCtx.drawImage(vizCanvas, 0, 0, overlay.width, overlay.height);
           prevBand.set(data);
         };
+
         loop();
       }
 
       startBtn.addEventListener("click", startCamera);
       stopBtn.addEventListener("click", stopCamera);
       window.addEventListener("resize", resizeOverlay);
-      countThresholdEl.addEventListener("input", () => {
-        countThresholdVal.textContent = countThresholdEl.value;
+
+      rowCompareCountEl.addEventListener("input", () => {
+        rowCompareCountVal.textContent = rowCompareCountEl.value;
       });
-      magnitudeThresholdEl.addEventListener("input", () => {
-        magnitudeThresholdVal.textContent = magnitudeThresholdEl.value;
-      });
-      chunkSizeEl.addEventListener("input", () => {
-        chunkSizeVal.textContent = chunkSizeEl.value;
-      });
-      rowSimilarityEl.addEventListener("input", () => {
-        rowSimilarityVal.textContent = rowSimilarityEl.value;
+      intensityThresholdEl.addEventListener("input", () => {
+        intensityThresholdVal.textContent = intensityThresholdEl.value;
       });
 
       navigator.mediaDevices.addEventListener("devicechange", listCameras);
+
       listCameras()
         .then(() => startCamera())
         .catch(() => setStatus("No camera access"));

@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camera View</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --panel: #1b1b1b;
+      --text: #f2f2f2;
+      --accent: #22c55e;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: monospace;
+    }
+
+    h1 {
+      margin: 0 0 16px 0;
+    }
+
+    .panel {
+      background: var(--panel);
+      padding: 12px;
+      border-radius: 8px;
+      max-width: 960px;
+    }
+
+    video {
+      width: 100%;
+      height: auto;
+      background: #000;
+      border-radius: 4px;
+    }
+
+    .controls {
+      margin-bottom: 12px;
+    }
+
+    .controls label {
+      margin-right: 8px;
+    }
+
+    .controls input[type="range"] {
+      width: 220px;
+      vertical-align: middle;
+    }
+
+    .controls input[type="checkbox"] {
+      vertical-align: middle;
+      margin-left: 12px;
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+    }
+
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      margin-top: 12px;
+      background: #000;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Camera View</h1>
+
+  <div class="panel">
+    <video id="video" playsinline autoplay muted></video>
+    <div class="controls">
+      <button id="startBtn">Start Camera</button>
+      <button id="stopBtn" disabled>Stop Camera</button>
+      <label for="edgeLen">Min Edge Length:</label>
+      <input id="edgeLen" type="range" min="0" max="100" value="40" />
+      <span id="edgeLenValue">40</span>
+      <label for="groupEdges">Group Same-Length Edges</label>
+      <input id="groupEdges" type="checkbox" />
+      <label for="linearOnly">Linear Only</label>
+      <input id="linearOnly" type="checkbox" />
+      <label for="linearTol">Linear Tol:</label>
+      <input id="linearTol" type="range" min="0" max="5" step="0.1" value="1.5" />
+      <span id="linearTolValue">1.5</span>
+      <label for="linearR2">Min R²:</label>
+      <input id="linearR2" type="range" min="0" max="1" step="0.01" value="0.9" />
+      <span id="linearR2Value">0.90</span>
+      <label for="colorEach">Color Each Edge</label>
+      <input id="colorEach" type="checkbox" />
+      <label for="sobelEdges">Sobel Edges</label>
+      <input id="sobelEdges" type="checkbox" />
+      <label for="cannyEdges">Canny-Like Edges</label>
+      <input id="cannyEdges" type="checkbox" />
+      <label for="internalEdges">Internal</label>
+      <input id="internalEdges" type="checkbox" />
+      <label for="upcDetect">UPC-A Detect</label>
+      <input id="upcDetect" type="checkbox" />
+      <label for="eanDetect">EAN-13 Detect</label>
+      <input id="eanDetect" type="checkbox" />
+      <label for="nccMin">Min NCC</label>
+      <input id="nccMin" type="range" min="0" max="1" step="0.01" value="0.5" />
+      <span id="nccMinValue">0.50</span>
+      <label for="internalRgbTol">Internal RGB %</label>
+      <input id="internalRgbTol" type="range" min="0" max="20" step="1" value="5" />
+      <span id="internalRgbTolValue">5</span>
+      <label for="internalDirSteps">Dir Lock Rows/Cols</label>
+      <input id="internalDirSteps" type="range" min="1" max="20" step="1" value="5" />
+      <span id="internalDirStepsValue">5</span>
+      <label for="internalMaxLen">Internal Max Len</label>
+      <input id="internalMaxLen" type="range" min="0" max="500" step="1" value="0" />
+      <span id="internalMaxLenValue">0</span>
+    </div>
+    <canvas id="output"></canvas>
+  </div>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const video = document.getElementById('video');
+    const edgeLen = document.getElementById('edgeLen');
+    const edgeLenValue = document.getElementById('edgeLenValue');
+    const groupEdges = document.getElementById('groupEdges');
+    const linearOnly = document.getElementById('linearOnly');
+    const linearTol = document.getElementById('linearTol');
+    const linearTolValue = document.getElementById('linearTolValue');
+    const linearR2 = document.getElementById('linearR2');
+    const linearR2Value = document.getElementById('linearR2Value');
+    const colorEach = document.getElementById('colorEach');
+    const sobelEdges = document.getElementById('sobelEdges');
+    const cannyEdges = document.getElementById('cannyEdges');
+    const internalEdges = document.getElementById('internalEdges');
+    const upcDetect = document.getElementById('upcDetect');
+    const eanDetect = document.getElementById('eanDetect');
+    const nccMin = document.getElementById('nccMin');
+    const nccMinValue = document.getElementById('nccMinValue');
+    const internalRgbTol = document.getElementById('internalRgbTol');
+    const internalRgbTolValue = document.getElementById('internalRgbTolValue');
+    const internalDirSteps = document.getElementById('internalDirSteps');
+    const internalDirStepsValue = document.getElementById('internalDirStepsValue');
+    const internalMaxLen = document.getElementById('internalMaxLen');
+    const internalMaxLenValue = document.getElementById('internalMaxLenValue');
+    const output = document.getElementById('output');
+    const outCtx = output.getContext('2d', { willReadFrequently: true });
+
+    let stream = null;
+    let running = false;
+    let rafId = 0;
+
+    const EDGE_RATIO = 0.4;
+    const COLOR_TOL = 10;
+    const LENGTH_TOL = 1;
+    const CLOSE_GAP = 5;
+    const CLOSE_PERP = 3;
+    const LINEAR_TOL_DEFAULT = 1.5;
+    const SOBEL_THRESH = 100;
+    const CANNY_LOW = 60;
+    const CANNY_HIGH = 120;
+
+    function idx(x, y, w) {
+      return y * w + x;
+    }
+
+    function isEdge(gray, i1, i2) {
+      const a = gray[i1];
+      const b = gray[i2];
+      const avg = (a + b) / 2;
+      if (avg < 1) return false;
+      return Math.abs(a - b) / avg >= EDGE_RATIO;
+    }
+
+    function similar(a, b) {
+      return Math.abs(a - b) <= COLOR_TOL;
+    }
+
+    function buildSobel(gray, w, h) {
+      const mag = new Uint16Array(w * h);
+      for (let y = 1; y < h - 1; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const i = idx(x, y, w);
+          const a00 = gray[i - w - 1];
+          const a01 = gray[i - w];
+          const a02 = gray[i - w + 1];
+          const a10 = gray[i - 1];
+          const a12 = gray[i + 1];
+          const a20 = gray[i + w - 1];
+          const a21 = gray[i + w];
+          const a22 = gray[i + w + 1];
+          const gx = (a02 + 2 * a12 + a22) - (a00 + 2 * a10 + a20);
+          const gy = (a20 + 2 * a21 + a22) - (a00 + 2 * a01 + a02);
+          mag[i] = Math.abs(gx) + Math.abs(gy);
+        }
+      }
+      return mag;
+    }
+
+    function buildEdgeMapSobel(gray, w, h) {
+      const mag = buildSobel(gray, w, h);
+      const edges = new Uint8Array(w * h);
+      for (let i = 0; i < mag.length; i += 1) {
+        if (mag[i] >= SOBEL_THRESH) edges[i] = 1;
+      }
+      return edges;
+    }
+
+    function buildEdgeMapCanny(gray, w, h) {
+      const mag = new Uint16Array(w * h);
+      const dir = new Uint8Array(w * h);
+
+      for (let y = 1; y < h - 1; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const i = idx(x, y, w);
+          const a00 = gray[i - w - 1];
+          const a01 = gray[i - w];
+          const a02 = gray[i - w + 1];
+          const a10 = gray[i - 1];
+          const a12 = gray[i + 1];
+          const a20 = gray[i + w - 1];
+          const a21 = gray[i + w];
+          const a22 = gray[i + w + 1];
+          const gx = (a02 + 2 * a12 + a22) - (a00 + 2 * a10 + a20);
+          const gy = (a20 + 2 * a21 + a22) - (a00 + 2 * a01 + a02);
+          const absGx = Math.abs(gx);
+          const absGy = Math.abs(gy);
+          mag[i] = absGx + absGy;
+
+          let angle = 0;
+          if (absGx > absGy) {
+            angle = absGy * 2 < absGx ? 0 : 1;
+          } else {
+            angle = absGx * 2 < absGy ? 2 : 3;
+          }
+          dir[i] = angle;
+        }
+      }
+
+      const nms = new Uint16Array(w * h);
+      for (let y = 1; y < h - 1; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const i = idx(x, y, w);
+          const m = mag[i];
+          if (m === 0) continue;
+          let m1 = 0;
+          let m2 = 0;
+          const angle = dir[i];
+          if (angle === 0) {
+            m1 = mag[i - 1];
+            m2 = mag[i + 1];
+          } else if (angle === 1) {
+            m1 = mag[i - w - 1];
+            m2 = mag[i + w + 1];
+          } else if (angle === 2) {
+            m1 = mag[i - w];
+            m2 = mag[i + w];
+          } else {
+            m1 = mag[i - w + 1];
+            m2 = mag[i + w - 1];
+          }
+          if (m >= m1 && m >= m2) nms[i] = m;
+        }
+      }
+
+      const edges = new Uint8Array(w * h);
+      const strong = [];
+      for (let i = 0; i < nms.length; i += 1) {
+        if (nms[i] >= CANNY_HIGH) {
+          edges[i] = 2;
+          strong.push(i);
+        } else if (nms[i] >= CANNY_LOW) {
+          edges[i] = 1;
+        }
+      }
+
+      while (strong.length) {
+        const i = strong.pop();
+        const x = i % w;
+        const y = (i / w) | 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            if (ox === 0 && oy === 0) continue;
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx <= 0 || nx >= w - 1 || ny <= 0 || ny >= h - 1) continue;
+            const ni = idx(nx, ny, w);
+            if (edges[ni] === 1) {
+              edges[ni] = 2;
+              strong.push(ni);
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < edges.length; i += 1) {
+        edges[i] = edges[i] === 2 ? 1 : 0;
+      }
+      return edges;
+    }
+
+    function isEdgeFromMap(edgeMap, i1, i2) {
+      return edgeMap[i1] || edgeMap[i2];
+    }
+
+    function buildGuardTemplate() {
+      const maskIdx = [];
+      const values = [];
+      const push = (idx, val) => {
+        maskIdx.push(idx);
+        values.push(val);
+      };
+      // UPC-A / EAN-13 guards: start 101, middle 01010, end 101
+      push(0, 1);
+      push(1, -1);
+      push(2, 1);
+      push(45, -1);
+      push(46, 1);
+      push(47, -1);
+      push(48, 1);
+      push(49, -1);
+      push(92, 1);
+      push(93, -1);
+      push(94, 1);
+      return { maskIdx, values, norm: Math.sqrt(maskIdx.length) };
+    }
+
+    const guardTemplate = buildGuardTemplate();
+
+    function nccGuardScore(prefix, x0, mw, maskIdx, values, norm) {
+      const n = maskIdx.length;
+      let sum = 0;
+      let sumsq = 0;
+      for (let i = 0; i < n; i += 1) {
+        const start = x0 + maskIdx[i] * mw;
+        const end = start + mw;
+        const avg = (prefix[end] - prefix[start]) / mw;
+        sum += avg;
+        sumsq += avg * avg;
+      }
+      const mean = sum / n;
+      const variance = sumsq / n - mean * mean;
+      if (variance <= 1e-6) return 0;
+      const std = Math.sqrt(variance);
+      let corr = 0;
+      for (let i = 0; i < n; i += 1) {
+        const start = x0 + maskIdx[i] * mw;
+        const end = start + mw;
+        const avg = (prefix[end] - prefix[start]) / mw;
+        corr += ((avg - mean) / std) * values[i];
+      }
+      return Math.abs(corr) / norm;
+    }
+
+    function detectGuardBarcode(gray, w, h, minScore) {
+      const maxMw = Math.min(20, Math.floor(w / 95));
+      if (maxMw < 1) return null;
+      const scanYs = [
+        Math.floor(h * 0.4),
+        Math.floor(h * 0.5),
+        Math.floor(h * 0.6)
+      ];
+      let best = { score: 0, x: 0, y: 0, mw: 0 };
+
+      for (let s = 0; s < scanYs.length; s += 1) {
+        const y = scanYs[s];
+        if (y < 0 || y >= h) continue;
+        const prefix = new Uint32Array(w + 1);
+        for (let x = 0; x < w; x += 1) {
+          prefix[x + 1] = prefix[x] + gray[idx(x, y, w)];
+        }
+        for (let mw = 1; mw <= maxMw; mw += 1) {
+          const windowLen = 95 * mw;
+          if (windowLen > w) break;
+          const step = Math.max(1, (mw / 2) | 0);
+          for (let x0 = 0; x0 <= w - windowLen; x0 += step) {
+            const score = nccGuardScore(prefix, x0, mw, guardTemplate.maskIdx, guardTemplate.values, guardTemplate.norm);
+            if (score > best.score) {
+              best = { score, x: x0, y, mw };
+            }
+          }
+        }
+      }
+
+      if (best.score >= minScore) return best;
+      return null;
+    }
+
+    function rgbClose(r1, g1, b1, r2, g2, b2, tol) {
+      const t = 255 * tol;
+      const tr = Math.abs(r1 - r2) <= t;
+      const tg = Math.abs(g1 - g2) <= t;
+      const tb = Math.abs(b1 - b2) <= t;
+      return tr && tg && tb;
+    }
+
+    function isEdgeRgb(gray, r, g, b, i1, i2, tol) {
+      if (!isEdge(gray, i1, i2)) return false;
+      return rgbClose(r[i1], g[i1], b[i1], r[i2], g[i2], b[i2], tol);
+    }
+
+    function traceInternalHorizontal(gray, r, g, b, w, h, startX, startY, visited, dirSteps, rgbTol, maxLen) {
+      let x = startX;
+      let y = startY;
+      const path = [{ x, y }];
+      visited[idx(x, y, w)] = 1;
+
+      let dir = null;
+      for (let step = 1; step <= dirSteps; step += 1) {
+        const ny = y + 1;
+        if (ny >= h) return null;
+        let chosen = null;
+        const offsets = dir === null ? [0, 1, -1] : [dir];
+        for (let i = 0; i < offsets.length; i += 1) {
+          const nx = x + offsets[i];
+          if (nx < 0 || nx >= w - 1) continue;
+          const i1 = idx(nx, ny, w);
+          if (visited[i1]) continue;
+          const i2 = i1 + 1;
+          if (!isEdgeRgb(gray, r, g, b, i1, i2, rgbTol)) continue;
+          chosen = { nx, ny, dir: offsets[i] };
+          break;
+        }
+        if (!chosen) return null;
+        if (dir === null) dir = chosen.dir;
+        x = chosen.nx;
+        y = chosen.ny;
+        visited[idx(x, y, w)] = 1;
+        path.push({ x, y });
+        if (maxLen > 0 && path.length >= maxLen) return path;
+      }
+
+      while (true) {
+        const ny = y + 1;
+        const nx = x + dir;
+        if (ny >= h || nx < 0 || nx >= w - 1) break;
+        const i1 = idx(nx, ny, w);
+        if (visited[i1]) break;
+        const i2 = i1 + 1;
+        if (!isEdgeRgb(gray, r, g, b, i1, i2, rgbTol)) break;
+        x = nx;
+        y = ny;
+        visited[i1] = 1;
+        path.push({ x, y });
+        if (maxLen > 0 && path.length >= maxLen) break;
+      }
+
+      return path;
+    }
+
+    function traceInternalVertical(gray, r, g, b, w, h, startX, startY, visited, dirSteps, rgbTol, maxLen) {
+      let x = startX;
+      let y = startY;
+      const path = [{ x, y }];
+      visited[idx(x, y, w)] = 1;
+
+      let dir = null;
+      for (let step = 1; step <= dirSteps; step += 1) {
+        const nx = x + 1;
+        if (nx >= w) return null;
+        let chosen = null;
+        const offsets = dir === null ? [0, 1, -1] : [dir];
+        for (let i = 0; i < offsets.length; i += 1) {
+          const ny = y + offsets[i];
+          if (ny < 0 || ny >= h - 1) continue;
+          const i1 = idx(nx, ny, w);
+          if (visited[i1]) continue;
+          const i2 = i1 + w;
+          if (!isEdgeRgb(gray, r, g, b, i1, i2, rgbTol)) continue;
+          chosen = { nx, ny, dir: offsets[i] };
+          break;
+        }
+        if (!chosen) return null;
+        if (dir === null) dir = chosen.dir;
+        x = chosen.nx;
+        y = chosen.ny;
+        visited[idx(x, y, w)] = 1;
+        path.push({ x, y });
+        if (maxLen > 0 && path.length >= maxLen) return path;
+      }
+
+      while (true) {
+        const nx = x + 1;
+        const ny = y + dir;
+        if (nx >= w || ny < 0 || ny >= h - 1) break;
+        const i1 = idx(nx, ny, w);
+        if (visited[i1]) break;
+        const i2 = i1 + w;
+        if (!isEdgeRgb(gray, r, g, b, i1, i2, rgbTol)) break;
+        x = nx;
+        y = ny;
+        visited[i1] = 1;
+        path.push({ x, y });
+        if (maxLen > 0 && path.length >= maxLen) break;
+      }
+
+      return path;
+    }
+
+    function traceHorizontal(gray, w, h, startX, startY, visited) {
+      let x = startX;
+      let y = startY;
+      let prevLeft = gray[idx(x, y, w)];
+      let prevRight = gray[idx(x + 1, y, w)];
+      let dy = 0;
+      const path = [{ x, y }];
+      visited[idx(x, y, w)] = 1;
+
+      while (true) {
+        const candidates = [dy, dy + 1, dy - 1, 0, 1, -1];
+        let found = false;
+
+        for (let i = 0; i < candidates.length; i += 1) {
+          const ny = y + candidates[i];
+          const nx = x + 1;
+          if (ny < 0 || ny >= h || nx >= w - 1) continue;
+          const leftIndex = idx(nx, ny, w);
+          if (visited[leftIndex]) continue;
+          const rightIndex = leftIndex + 1;
+          if (!isEdge(gray, leftIndex, rightIndex)) continue;
+          const leftVal = gray[leftIndex];
+          const rightVal = gray[rightIndex];
+          if (!similar(leftVal, prevLeft) || !similar(rightVal, prevRight)) continue;
+
+          dy = ny - y;
+          x = nx;
+          y = ny;
+          prevLeft = leftVal;
+          prevRight = rightVal;
+          visited[leftIndex] = 1;
+          path.push({ x, y });
+          found = true;
+          break;
+        }
+
+        if (!found) break;
+      }
+
+      return path;
+    }
+
+    function traceVertical(gray, w, h, startX, startY, visited) {
+      let x = startX;
+      let y = startY;
+      let prevTop = gray[idx(x, y, w)];
+      let prevBottom = gray[idx(x, y + 1, w)];
+      let dx = 0;
+      const path = [{ x, y }];
+      visited[idx(x, y, w)] = 1;
+
+      while (true) {
+        const candidates = [dx, dx + 1, dx - 1, 0, 1, -1];
+        let found = false;
+
+        for (let i = 0; i < candidates.length; i += 1) {
+          const nx = x + candidates[i];
+          const ny = y + 1;
+          if (nx < 0 || nx >= w || ny >= h - 1) continue;
+          const topIndex = idx(nx, ny, w);
+          if (visited[topIndex]) continue;
+          const bottomIndex = topIndex + w;
+          if (!isEdge(gray, topIndex, bottomIndex)) continue;
+          const topVal = gray[topIndex];
+          const bottomVal = gray[bottomIndex];
+          if (!similar(topVal, prevTop) || !similar(bottomVal, prevBottom)) continue;
+
+          dx = nx - x;
+          x = nx;
+          y = ny;
+          prevTop = topVal;
+          prevBottom = bottomVal;
+          visited[topIndex] = 1;
+          path.push({ x, y });
+          found = true;
+          break;
+        }
+
+        if (!found) break;
+      }
+
+      return path;
+    }
+
+    function isLinearHorizontal(path, tol, minR2) {
+      if (path.length < 3) return false;
+      let sumX = 0;
+      let sumY = 0;
+      let sumXX = 0;
+      let sumXY = 0;
+      let sumYY = 0;
+      const n = path.length;
+
+      for (let i = 0; i < n; i += 1) {
+        const p = path[i];
+        sumX += p.x;
+        sumY += p.y;
+        sumXX += p.x * p.x;
+        sumXY += p.x * p.y;
+        sumYY += p.y * p.y;
+      }
+
+      const denom = n * sumXX - sumX * sumX;
+      if (denom === 0) return false;
+      const slope = (n * sumXY - sumX * sumY) / denom;
+      const intercept = (sumY - slope * sumX) / n;
+
+      const meanY = sumY / n;
+      const ssTot = sumYY - n * meanY * meanY;
+      if (ssTot <= 0) return false;
+
+      let ssRes = 0;
+      for (let i = 0; i < n; i += 1) {
+        const p = path[i];
+        const yExpected = slope * p.x + intercept;
+        const dy = p.y - yExpected;
+        ssRes += dy * dy;
+        const dist = Math.abs(slope * p.x - p.y + intercept) / Math.sqrt(slope * slope + 1);
+        if (dist > tol) return false;
+      }
+      const r2 = 1 - ssRes / ssTot;
+      if (r2 < minR2) return false;
+      return true;
+    }
+
+    function isLinearVertical(path, tol, minR2) {
+      if (path.length < 3) return false;
+      let sumX = 0;
+      let sumY = 0;
+      let sumYY = 0;
+      let sumXY = 0;
+      let sumXX = 0;
+      const n = path.length;
+
+      for (let i = 0; i < n; i += 1) {
+        const p = path[i];
+        sumX += p.x;
+        sumY += p.y;
+        sumYY += p.y * p.y;
+        sumXY += p.x * p.y;
+        sumXX += p.x * p.x;
+      }
+
+      const denom = n * sumYY - sumY * sumY;
+      if (denom === 0) return false;
+      const slope = (n * sumXY - sumX * sumY) / denom;
+      const intercept = (sumX - slope * sumY) / n;
+
+      const meanX = sumX / n;
+      const ssTot = sumXX - n * meanX * meanX;
+      if (ssTot <= 0) return false;
+
+      let ssRes = 0;
+      for (let i = 0; i < n; i += 1) {
+        const p = path[i];
+        const xExpected = slope * p.y + intercept;
+        const dx = p.x - xExpected;
+        ssRes += dx * dx;
+        const dist = Math.abs(slope * p.y - p.x + intercept) / Math.sqrt(slope * slope + 1);
+        if (dist > tol) return false;
+      }
+      const r2 = 1 - ssRes / ssTot;
+      if (r2 < minR2) return false;
+      return true;
+    }
+
+    function colorForIndex(i) {
+      const h = (i * 137.508) % 360;
+      return `hsl(${h}, 90%, 60%)`;
+    }
+
+    function processFrame() {
+      if (!running) return;
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) {
+        rafId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      if (output.width !== w || output.height !== h) {
+        output.width = w;
+        output.height = h;
+      }
+
+      outCtx.drawImage(video, 0, 0, w, h);
+      const frame = outCtx.getImageData(0, 0, w, h);
+      const data = frame.data;
+      const gray = new Uint8Array(w * h);
+      const r = new Uint8Array(w * h);
+      const g = new Uint8Array(w * h);
+      const b = new Uint8Array(w * h);
+
+      for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+        const rv = data[i];
+        const gv = data[i + 1];
+        const bv = data[i + 2];
+        r[p] = rv;
+        g[p] = gv;
+        b[p] = bv;
+        gray[p] = (rv * 0.3 + gv * 0.59 + bv * 0.11) | 0;
+      }
+
+      const maxLen = Number(edgeLen.value) || 0;
+      const visitedH = new Uint8Array(w * h);
+      const visitedV = new Uint8Array(w * h);
+      const hSegments = [];
+      const vSegments = [];
+      const useInternal = internalEdges.checked;
+      const useCanny = !useInternal && cannyEdges.checked;
+      const useSobel = !useCanny && sobelEdges.checked;
+      const edgeMap = useCanny
+        ? buildEdgeMapCanny(gray, w, h)
+        : useSobel
+          ? buildEdgeMapSobel(gray, w, h)
+          : null;
+      const tol = Number(linearTol.value) || LINEAR_TOL_DEFAULT;
+      const minR2 = Number(linearR2.value) || 0;
+      const rgbTol = Math.max(0, Math.min(1, Number(internalRgbTol.value) / 100));
+      const dirSteps = Number(internalDirSteps.value) || 1;
+      const internalMax = Number(internalMaxLen.value) || 0;
+
+      outCtx.putImageData(frame, 0, 0);
+      outCtx.fillStyle = '#00ff55';
+
+      if (useInternal) {
+        for (let y = 0; y < h - dirSteps; y += 1) {
+          for (let x = 0; x < w - 1; x += 1) {
+            const leftIndex = idx(x, y, w);
+            if (visitedH[leftIndex]) continue;
+            const rightIndex = leftIndex + 1;
+            if (!isEdgeRgb(gray, r, g, b, leftIndex, rightIndex, rgbTol)) continue;
+            const path = traceInternalHorizontal(gray, r, g, b, w, h, x, y, visitedH, dirSteps, rgbTol, internalMax);
+            if (!path) continue;
+            if (!isLinearHorizontal(path, tol, minR2)) continue;
+            hSegments.push({
+              path,
+              length: path.length,
+              minX: path[0].x,
+              maxX: path[path.length - 1].x + 1,
+              minY: path.reduce((m, p) => Math.min(m, p.y), path[0].y),
+              maxY: path.reduce((m, p) => Math.max(m, p.y), path[0].y),
+            });
+            if (path.length >= maxLen) {
+              if (colorEach.checked) outCtx.fillStyle = colorForIndex(hSegments.length - 1);
+              else outCtx.fillStyle = '#00ff55';
+              for (let i = 0; i < path.length; i += 1) {
+                const pt = path[i];
+                outCtx.fillRect(pt.x + 1, pt.y, 1, 1);
+              }
+            }
+          }
+        }
+
+        for (let y = 0; y < h - 1; y += 1) {
+          for (let x = 0; x < w - dirSteps; x += 1) {
+            const topIndex = idx(x, y, w);
+            if (visitedV[topIndex]) continue;
+            const bottomIndex = topIndex + w;
+            if (!isEdgeRgb(gray, r, g, b, topIndex, bottomIndex, rgbTol)) continue;
+            const path = traceInternalVertical(gray, r, g, b, w, h, x, y, visitedV, dirSteps, rgbTol, internalMax);
+            if (!path) continue;
+            if (!isLinearVertical(path, tol, minR2)) continue;
+            vSegments.push({
+              path,
+              length: path.length,
+              minX: path.reduce((m, p) => Math.min(m, p.x), path[0].x),
+              maxX: path.reduce((m, p) => Math.max(m, p.x), path[0].x),
+              minY: path[0].y,
+              maxY: path[path.length - 1].y + 1,
+            });
+            if (path.length >= maxLen) {
+              if (colorEach.checked) outCtx.fillStyle = colorForIndex(vSegments.length - 1);
+              else outCtx.fillStyle = '#00ff55';
+              for (let i = 0; i < path.length; i += 1) {
+                const pt = path[i];
+                outCtx.fillRect(pt.x, pt.y + 1, 1, 1);
+              }
+            }
+          }
+        }
+      } else {
+        for (let y = 0; y < h; y += 1) {
+          for (let x = 0; x < w - 1; x += 1) {
+            const leftIndex = idx(x, y, w);
+            if (visitedH[leftIndex]) continue;
+            const rightIndex = leftIndex + 1;
+            if (edgeMap) {
+              if (!isEdgeFromMap(edgeMap, leftIndex, rightIndex)) continue;
+            } else if (!isEdge(gray, leftIndex, rightIndex)) {
+              continue;
+            }
+            const path = traceHorizontal(gray, w, h, x, y, visitedH);
+            if (linearOnly.checked && !isLinearHorizontal(path, tol, minR2)) continue;
+            hSegments.push({
+              path,
+              length: path.length,
+              minX: path[0].x,
+              maxX: path[path.length - 1].x + 1,
+              minY: path.reduce((m, p) => Math.min(m, p.y), path[0].y),
+              maxY: path.reduce((m, p) => Math.max(m, p.y), path[0].y),
+            });
+            if (path.length >= maxLen) {
+              if (colorEach.checked) outCtx.fillStyle = colorForIndex(hSegments.length - 1);
+              else outCtx.fillStyle = '#00ff55';
+              for (let i = 0; i < path.length; i += 1) {
+                const pt = path[i];
+                outCtx.fillRect(pt.x + 1, pt.y, 1, 1);
+              }
+            }
+          }
+        }
+
+        for (let y = 0; y < h - 1; y += 1) {
+          for (let x = 0; x < w; x += 1) {
+            const topIndex = idx(x, y, w);
+            if (visitedV[topIndex]) continue;
+            const bottomIndex = topIndex + w;
+            if (edgeMap) {
+              if (!isEdgeFromMap(edgeMap, topIndex, bottomIndex)) continue;
+            } else if (!isEdge(gray, topIndex, bottomIndex)) {
+              continue;
+            }
+            const path = traceVertical(gray, w, h, x, y, visitedV);
+            if (linearOnly.checked && !isLinearVertical(path, tol, minR2)) continue;
+            vSegments.push({
+              path,
+              length: path.length,
+              minX: path.reduce((m, p) => Math.min(m, p.x), path[0].x),
+              maxX: path.reduce((m, p) => Math.max(m, p.x), path[0].x),
+              minY: path[0].y,
+              maxY: path[path.length - 1].y + 1,
+            });
+            if (path.length >= maxLen) {
+              if (colorEach.checked) outCtx.fillStyle = colorForIndex(vSegments.length - 1);
+              else outCtx.fillStyle = '#00ff55';
+              for (let i = 0; i < path.length; i += 1) {
+                const pt = path[i];
+                outCtx.fillRect(pt.x, pt.y + 1, 1, 1);
+              }
+            }
+          }
+        }
+      }
+
+      if (groupEdges.checked) {
+        const hMark = new Uint8Array(hSegments.length);
+        const vMark = new Uint8Array(vSegments.length);
+
+        for (let i = 0; i < hSegments.length; i += 1) {
+          for (let j = i + 1; j < hSegments.length; j += 1) {
+            const a = hSegments[i];
+            const b = hSegments[j];
+            if (Math.abs(a.length - b.length) > LENGTH_TOL) continue;
+            if (Math.abs(a.minY - b.minY) > CLOSE_PERP && Math.abs(a.maxY - b.maxY) > CLOSE_PERP) continue;
+            if (a.maxX + CLOSE_GAP < b.minX && b.maxX + CLOSE_GAP < a.minX) continue;
+            hMark[i] = 1;
+            hMark[j] = 1;
+          }
+        }
+
+        for (let i = 0; i < vSegments.length; i += 1) {
+          for (let j = i + 1; j < vSegments.length; j += 1) {
+            const a = vSegments[i];
+            const b = vSegments[j];
+            if (Math.abs(a.length - b.length) > LENGTH_TOL) continue;
+            if (Math.abs(a.minX - b.minX) > CLOSE_PERP && Math.abs(a.maxX - b.maxX) > CLOSE_PERP) continue;
+            if (a.maxY + CLOSE_GAP < b.minY && b.maxY + CLOSE_GAP < a.minY) continue;
+            vMark[i] = 1;
+            vMark[j] = 1;
+          }
+        }
+
+        outCtx.fillStyle = '#3399ff';
+        for (let i = 0; i < hSegments.length; i += 1) {
+          if (!hMark[i]) continue;
+          const seg = hSegments[i];
+          if (colorEach.checked) outCtx.fillStyle = colorForIndex(i);
+          else outCtx.fillStyle = '#3399ff';
+          for (let p = 0; p < seg.path.length; p += 1) {
+            const pt = seg.path[p];
+            outCtx.fillRect(pt.x + 1, pt.y, 1, 1);
+          }
+        }
+        for (let i = 0; i < vSegments.length; i += 1) {
+          if (!vMark[i]) continue;
+          const seg = vSegments[i];
+          if (colorEach.checked) outCtx.fillStyle = colorForIndex(i + hSegments.length);
+          else outCtx.fillStyle = '#3399ff';
+          for (let p = 0; p < seg.path.length; p += 1) {
+            const pt = seg.path[p];
+            outCtx.fillRect(pt.x, pt.y + 1, 1, 1);
+          }
+        }
+      }
+
+      if (upcDetect.checked || eanDetect.checked) {
+        const minScore = Number(nccMin.value) || 0;
+        const best = detectGuardBarcode(gray, w, h, minScore);
+        if (best) {
+          const windowLen = 95 * best.mw;
+          outCtx.strokeStyle = '#4da3ff';
+          outCtx.lineWidth = 2;
+          outCtx.strokeRect(best.x, best.y - 8, windowLen, 16);
+          outCtx.fillStyle = '#4da3ff';
+          const label = upcDetect.checked && eanDetect.checked ? 'UPC/EAN' : upcDetect.checked ? 'UPC-A' : 'EAN-13';
+          outCtx.fillText(`${label} NCC ${best.score.toFixed(2)}`, best.x + 4, Math.max(12, best.y - 10));
+        }
+      }
+
+      rafId = requestAnimationFrame(processFrame);
+    }
+
+    async function startCamera() {
+      stopCamera();
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      running = true;
+      processFrame();
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+        stream = null;
+      }
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener('click', () => {
+      startCamera().catch((err) => {
+        console.error('Camera start failed:', err);
+        stopCamera();
+        alert('Unable to access camera. Check permissions and try again.');
+      });
+    });
+
+    stopBtn.addEventListener('click', stopCamera);
+
+    edgeLen.addEventListener('input', () => {
+      edgeLenValue.textContent = edgeLen.value;
+    });
+
+    linearTol.addEventListener('input', () => {
+      linearTolValue.textContent = linearTol.value;
+    });
+
+    linearR2.addEventListener('input', () => {
+      linearR2Value.textContent = Number(linearR2.value).toFixed(2);
+    });
+
+    internalRgbTol.addEventListener('input', () => {
+      internalRgbTolValue.textContent = internalRgbTol.value;
+    });
+
+    internalDirSteps.addEventListener('input', () => {
+      internalDirStepsValue.textContent = internalDirSteps.value;
+    });
+
+    internalMaxLen.addEventListener('input', () => {
+      internalMaxLenValue.textContent = internalMaxLen.value;
+    });
+
+    nccMin.addEventListener('input', () => {
+      nccMinValue.textContent = Number(nccMin.value).toFixed(2);
+    });
+  </script>
+</body>
+</html>
