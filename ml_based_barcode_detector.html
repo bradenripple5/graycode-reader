@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ML Based Barcode Detector (YOLO)</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap");
+      :root {
+        --bg: #0b0e16;
+        --panel: #111726;
+        --panel-2: #0f1420;
+        --accent: #ffb020;
+        --accent-2: #59d1ff;
+        --text: #e9eef7;
+        --muted: #9fb0c8;
+        --danger: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", Arial, sans-serif;
+        color: var(--text);
+        background: radial-gradient(900px 700px at 15% 10%, #1b2340 0%, var(--bg) 60%);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+      .app {
+        width: min(1100px, 96vw);
+        background: linear-gradient(180deg, #131a2b 0%, #0b0e16 100%);
+        border: 1px solid #1b2437;
+        border-radius: 20px;
+        padding: 18px;
+        box-shadow: 0 24px 60px rgba(3, 6, 12, 0.6);
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 18px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-top: 4px;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      button, select, input[type="range"], input[type="file"] {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid #253047;
+        border-radius: 12px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+      button.primary {
+        background: linear-gradient(135deg, #ffb020 0%, #ff7a18 100%);
+        border-color: #ffb020;
+        color: #0b0e16;
+        font-weight: 700;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+        gap: 16px;
+      }
+      .viewport {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        background: #0a0f18;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid #1c2638;
+      }
+      video, canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .hud {
+        position: absolute;
+        inset: 14px;
+        border: 2px dashed rgba(89, 209, 255, 0.35);
+        border-radius: 14px;
+        pointer-events: none;
+      }
+      .panel {
+        background: var(--panel-2);
+        border: 1px solid #1b2437;
+        border-radius: 16px;
+        padding: 14px;
+        display: grid;
+        gap: 10px;
+      }
+      .panel h3 {
+        margin: 0;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .status strong { color: var(--text); }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 176, 32, 0.1);
+        color: var(--accent);
+        border: 1px solid rgba(255, 176, 32, 0.4);
+        font-size: 12px;
+        font-family: "JetBrains Mono", monospace;
+      }
+      .danger {
+        color: var(--danger);
+      }
+      .small {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .range-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .mono {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        color: var(--accent-2);
+      }
+      @media (max-width: 900px) {
+        .layout { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="header">
+        <div>
+          <div class="title">ML Based Barcode Detector</div>
+          <div class="subtitle">YOLO + ONNX Runtime (Browser)</div>
+        </div>
+        <div class="controls">
+          <select id="cameraSelect"></select>
+          <button id="startBtn" class="primary">Start Camera</button>
+          <button id="stopBtn">Stop</button>
+        </div>
+      </div>
+
+      <div class="layout">
+        <div class="viewport">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div class="hud"></div>
+        </div>
+
+        <div class="panel">
+          <h3>Model</h3>
+          <div class="row">
+            <span class="status">Model</span>
+            <span class="pill" id="modelBadge">Not loaded</span>
+          </div>
+          <input id="modelFile" type="file" accept=".onnx" />
+          <input id="labelsFile" type="file" accept=".txt" />
+          <div class="small">
+            Provide a barcode-trained YOLO ONNX model. Labels file is optional (one class name per line).
+          </div>
+
+          <h3>Settings</h3>
+          <div class="range-row">
+            <label>Confidence</label>
+            <div>
+              <input id="confThreshold" type="range" min="0" max="100" value="35" />
+              <span class="mono" id="confVal">0.35</span>
+            </div>
+          </div>
+          <div class="range-row">
+            <label>IoU (NMS)</label>
+            <div>
+              <input id="iouThreshold" type="range" min="0" max="100" value="45" />
+              <span class="mono" id="iouVal">0.45</span>
+            </div>
+          </div>
+          <div class="row">
+            <label>Detect Every</label>
+            <select id="fpsSelect">
+              <option value="2">2 fps</option>
+              <option value="5" selected>5 fps</option>
+              <option value="10">10 fps</option>
+            </select>
+          </div>
+
+          <h3>Status</h3>
+          <div class="status" id="status">Status: <strong>Idle</strong></div>
+          <div class="status" id="lastResult">Last: <strong>—</strong></div>
+          <div class="status" id="perf">Perf: <strong>—</strong></div>
+          <div class="small danger" id="warning"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script>
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const overlayCtx = overlay.getContext("2d");
+      const statusEl = document.getElementById("status");
+      const lastResultEl = document.getElementById("lastResult");
+      const perfEl = document.getElementById("perf");
+      const warningEl = document.getElementById("warning");
+      const cameraSelect = document.getElementById("cameraSelect");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const modelFileEl = document.getElementById("modelFile");
+      const labelsFileEl = document.getElementById("labelsFile");
+      const modelBadge = document.getElementById("modelBadge");
+      const confThresholdEl = document.getElementById("confThreshold");
+      const iouThresholdEl = document.getElementById("iouThreshold");
+      const confValEl = document.getElementById("confVal");
+      const iouValEl = document.getElementById("iouVal");
+      const fpsSelect = document.getElementById("fpsSelect");
+
+      let stream = null;
+      let rafId = 0;
+      let session = null;
+      let labels = [];
+      let modelInputName = "images";
+      let modelInputSize = 640;
+      let lastFrameTime = 0;
+      let lastInferMs = 0;
+      let lastDetections = [];
+
+      const frameCanvas = document.createElement("canvas");
+      const frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
+
+      function setStatus(text) {
+        statusEl.innerHTML = `Status: <strong>${text}</strong>`;
+      }
+
+      function setLastResult(text) {
+        lastResultEl.innerHTML = `Last: <strong>${text}</strong>`;
+      }
+
+      function updateSliders() {
+        confValEl.textContent = (confThresholdEl.value / 100).toFixed(2);
+        iouValEl.textContent = (iouThresholdEl.value / 100).toFixed(2);
+      }
+
+      updateSliders();
+      confThresholdEl.addEventListener("input", updateSliders);
+      iouThresholdEl.addEventListener("input", updateSliders);
+
+      function pickBackCameraId(cams) {
+        const labelMatch = cams.find((cam) => /back|rear|environment/i.test(cam.label));
+        return labelMatch ? labelMatch.deviceId : (cams[0] ? cams[0].deviceId : "");
+      }
+
+      async function listCameras() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        cameraSelect.innerHTML = "";
+        cams.forEach((cam, idx) => {
+          const opt = document.createElement("option");
+          opt.value = cam.deviceId;
+          opt.textContent = cam.label || `Camera ${idx + 1}`;
+          cameraSelect.appendChild(opt);
+        });
+        const preferred = pickBackCameraId(cams);
+        if (preferred) cameraSelect.value = preferred;
+      }
+
+      async function startCamera() {
+        stopCamera();
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        const preferredId = pickBackCameraId(cams);
+        const deviceId = cameraSelect.value || preferredId || undefined;
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId,
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        resizeOverlay();
+        setStatus("Camera active");
+        loop();
+      }
+
+      function stopCamera() {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = 0;
+        if (stream) {
+          stream.getTracks().forEach((t) => t.stop());
+          stream = null;
+        }
+        setStatus("Idle");
+      }
+
+      function resizeOverlay() {
+        overlay.width = video.videoWidth || 1280;
+        overlay.height = video.videoHeight || 720;
+      }
+
+      window.addEventListener("resize", resizeOverlay);
+
+      function drawDetections(dets) {
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        overlayCtx.lineWidth = 3;
+        overlayCtx.font = "16px Space Grotesk";
+        dets.forEach((det) => {
+          overlayCtx.strokeStyle = "#3de288";
+          overlayCtx.fillStyle = "rgba(14, 40, 28, 0.6)";
+          overlayCtx.strokeRect(det.x, det.y, det.w, det.h);
+          const label = `${det.label} ${(det.score * 100).toFixed(1)}%`;
+          const textW = overlayCtx.measureText(label).width + 10;
+          overlayCtx.fillRect(det.x, det.y - 24, textW, 22);
+          overlayCtx.fillStyle = "#e8fff3";
+          overlayCtx.fillText(label, det.x + 5, det.y - 8);
+        });
+      }
+
+      function letterbox(imageData, targetSize) {
+        const srcW = imageData.width;
+        const srcH = imageData.height;
+        const scale = Math.min(targetSize / srcW, targetSize / srcH);
+        const newW = Math.round(srcW * scale);
+        const newH = Math.round(srcH * scale);
+        const dx = Math.floor((targetSize - newW) / 2);
+        const dy = Math.floor((targetSize - newH) / 2);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = targetSize;
+        canvas.height = targetSize;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, targetSize, targetSize);
+        ctx.drawImage(imageData, 0, 0, srcW, srcH, dx, dy, newW, newH);
+        return { canvas, scale, dx, dy };
+      }
+
+      function imageToTensor(canvas, size) {
+        const ctx = canvas.getContext("2d");
+        const img = ctx.getImageData(0, 0, size, size).data;
+        const float = new Float32Array(1 * 3 * size * size);
+        let p = 0;
+        for (let i = 0; i < img.length; i += 4) {
+          const r = img[i] / 255;
+          const g = img[i + 1] / 255;
+          const b = img[i + 2] / 255;
+          float[p++] = r;
+          float[p++] = g;
+          float[p++] = b;
+        }
+        return new ort.Tensor("float32", float, [1, 3, size, size]);
+      }
+
+      function nms(dets, iouThreshold) {
+        dets.sort((a, b) => b.score - a.score);
+        const out = [];
+        const used = new Array(dets.length).fill(false);
+        for (let i = 0; i < dets.length; i++) {
+          if (used[i]) continue;
+          out.push(dets[i]);
+          for (let j = i + 1; j < dets.length; j++) {
+            if (used[j]) continue;
+            if (iou(dets[i], dets[j]) > iouThreshold) {
+              used[j] = true;
+            }
+          }
+        }
+        return out;
+      }
+
+      function iou(a, b) {
+        const x1 = Math.max(a.x, b.x);
+        const y1 = Math.max(a.y, b.y);
+        const x2 = Math.min(a.x + a.w, b.x + b.w);
+        const y2 = Math.min(a.y + a.h, b.y + b.h);
+        const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+        const union = a.w * a.h + b.w * b.h - inter;
+        return union <= 0 ? 0 : inter / union;
+      }
+
+      function parseYoloOutput(output, confThreshold, iouThreshold, scale, dx, dy) {
+        const data = output.data;
+        const dims = output.dims;
+        const num = dims[dims.length - 2];
+        const stride = dims[dims.length - 1];
+
+        const dets = [];
+        for (let i = 0; i < num; i++) {
+          const base = i * stride;
+          const cx = data[base + 0];
+          const cy = data[base + 1];
+          const w = data[base + 2];
+          const h = data[base + 3];
+          const obj = data[base + 4];
+
+          let classId = 0;
+          let classScore = 1;
+          if (stride > 5) {
+            classScore = 0;
+            for (let c = 5; c < stride; c++) {
+              if (data[base + c] > classScore) {
+                classScore = data[base + c];
+                classId = c - 5;
+              }
+            }
+          }
+          const score = obj * classScore;
+          if (score < confThreshold) continue;
+
+          const x = (cx - w / 2 - dx) / scale;
+          const y = (cy - h / 2 - dy) / scale;
+          const rectW = w / scale;
+          const rectH = h / scale;
+
+          dets.push({
+            x: Math.max(0, x),
+            y: Math.max(0, y),
+            w: Math.max(0, rectW),
+            h: Math.max(0, rectH),
+            score,
+            label: labels[classId] || "barcode"
+          });
+        }
+        return nms(dets, iouThreshold);
+      }
+
+      async function runInference() {
+        if (!session || !stream) return;
+        const { videoWidth, videoHeight } = video;
+        if (!videoWidth || !videoHeight) return;
+
+        frameCanvas.width = videoWidth;
+        frameCanvas.height = videoHeight;
+        frameCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+        const imageData = frameCtx.getImageData(0, 0, videoWidth, videoHeight);
+
+        const { canvas, scale, dx, dy } = letterbox(imageData, modelInputSize);
+        const inputTensor = imageToTensor(canvas, modelInputSize);
+
+        const start = performance.now();
+        const feeds = { [modelInputName]: inputTensor };
+        const results = await session.run(feeds);
+        const outputName = session.outputNames[0];
+        const output = results[outputName];
+        const confThreshold = confThresholdEl.value / 100;
+        const iouThreshold = iouThresholdEl.value / 100;
+        const dets = parseYoloOutput(output, confThreshold, iouThreshold, scale, dx, dy);
+        lastInferMs = performance.now() - start;
+
+        lastDetections = dets;
+        drawDetections(dets);
+        if (dets.length) {
+          setLastResult(`${dets.length} barcode(s) detected`);
+        } else {
+          setLastResult("No barcodes detected");
+        }
+        perfEl.innerHTML = `Perf: <strong>${lastInferMs.toFixed(0)} ms</strong>`;
+      }
+
+      function loop(ts = 0) {
+        const fps = Number(fpsSelect.value);
+        const interval = 1000 / fps;
+        if (ts - lastFrameTime > interval) {
+          lastFrameTime = ts;
+          runInference().catch((err) => {
+            console.error(err);
+            warningEl.textContent = "Inference failed. Check model input/output format.";
+          });
+        }
+        rafId = requestAnimationFrame(loop);
+      }
+
+      async function loadModelFromFile(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        session = await ort.InferenceSession.create(arrayBuffer, {
+          executionProviders: ["wasm"],
+          graphOptimizationLevel: "all"
+        });
+        modelInputName = session.inputNames[0];
+        const inputMeta = session.inputMetadata[modelInputName];
+        const dims = inputMeta.dimensions;
+        modelInputSize = dims[dims.length - 1];
+        modelBadge.textContent = file.name;
+        warningEl.textContent = "";
+        setStatus("Model loaded");
+      }
+
+      async function loadLabelsFromFile(file) {
+        const text = await file.text();
+        labels = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      }
+
+      modelFileEl.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setStatus("Loading model...");
+        await loadModelFromFile(file);
+      });
+
+      labelsFileEl.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        await loadLabelsFromFile(file);
+      });
+
+      startBtn.addEventListener("click", startCamera);
+      stopBtn.addEventListener("click", stopCamera);
+
+      navigator.mediaDevices.addEventListener("devicechange", listCameras);
+      listCameras().catch(() => {
+        warningEl.textContent = "Could not access cameras list. Start camera first.";
+      });
+
+      setStatus("Idle (load a YOLO barcode model)");
+    </script>
+  </body>
+</html>

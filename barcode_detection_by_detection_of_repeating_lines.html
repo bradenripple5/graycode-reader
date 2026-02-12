@@ -32,23 +32,7 @@
     }
 
     video {
-      width: 100%;
-      height: auto;
-      background: #000;
-      border-radius: 4px;
-    }
-
-    .controls {
-      margin-bottom: 12px;
-    }
-
-    .controls label {
-      margin-right: 8px;
-    }
-
-    .controls input[type="range"] {
-      width: 220px;
-      vertical-align: middle;
+      display: none;
     }
 
     button {
@@ -67,6 +51,23 @@
       cursor: not-allowed;
     }
 
+    .controls {
+      margin-bottom: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .controls label {
+      margin-right: 6px;
+    }
+
+    .controls input[type="range"] {
+      width: 200px;
+      vertical-align: middle;
+    }
+
     canvas {
       width: 100%;
       height: auto;
@@ -83,9 +84,28 @@
     <div class="controls">
       <button id="startBtn">Start Camera</button>
       <button id="stopBtn" disabled>Stop Camera</button>
-      <label for="repeatCount">Repeat Rows:</label>
-      <input id="repeatCount" type="range" min="2" max="20" value="6" />
-      <span id="repeatCountValue">6</span>
+      <label for="repeatPercent">Vertical Repeat %:</label>
+      <input id="repeatPercent" type="range" min="0" max="100" value="70" />
+      <span id="repeatPercentValue">70%</span>
+      <label for="diffThreshold">Diff Threshold:</label>
+      <input id="diffThreshold" type="range" min="0" max="80" value="18" />
+      <span id="diffThresholdValue">18</span>
+      <label for="binaryThreshold">Binary Threshold:</label>
+      <input id="binaryThreshold" type="range" min="0" max="255" value="128" />
+      <span id="binaryThresholdValue">128</span>
+      <label for="gridRows">Grid Rows (m):</label>
+      <input id="gridRows" type="range" min="1" max="12" value="10" />
+      <span id="gridRowsValue">10</span>
+      <label for="gridCols">Grid Cols (n):</label>
+      <input id="gridCols" type="range" min="1" max="12" value="10" />
+      <span id="gridColsValue">10</span>
+      <label for="changeCount">Change Count:</label>
+      <input id="changeCount" type="range" min="0" max="60" value="6" />
+      <span id="changeCountValue">6</span>
+      <label>
+        <input id="requireRepeatRunCounts" type="checkbox" />
+        Require repeat run counts
+      </label>
     </div>
     <video id="video" playsinline autoplay muted></video>
     <canvas id="output"></canvas>
@@ -95,8 +115,19 @@
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const video = document.getElementById('video');
-    const repeatCount = document.getElementById('repeatCount');
-    const repeatCountValue = document.getElementById('repeatCountValue');
+    const repeatPercent = document.getElementById('repeatPercent');
+    const repeatPercentValue = document.getElementById('repeatPercentValue');
+    const diffThreshold = document.getElementById('diffThreshold');
+    const diffThresholdValue = document.getElementById('diffThresholdValue');
+    const binaryThreshold = document.getElementById('binaryThreshold');
+    const binaryThresholdValue = document.getElementById('binaryThresholdValue');
+    const gridRows = document.getElementById('gridRows');
+    const gridRowsValue = document.getElementById('gridRowsValue');
+    const gridCols = document.getElementById('gridCols');
+    const gridColsValue = document.getElementById('gridColsValue');
+    const changeCount = document.getElementById('changeCount');
+    const changeCountValue = document.getElementById('changeCountValue');
+    const requireRepeatRunCounts = document.getElementById('requireRepeatRunCounts');
     const output = document.getElementById('output');
     const outCtx = output.getContext('2d', { willReadFrequently: true });
 
@@ -104,93 +135,15 @@
     let running = false;
     let rafId = 0;
 
-    const SHIFT_TOL = 2;
-    const ROW_DIFF_TOL = 16;
-
-    function rowDiff(gray, w, y1, y2, shift) {
-      const xStart = Math.max(0, shift);
-      const xEnd = w + Math.min(0, shift);
-      let sum = 0;
-      const offset1 = y1 * w;
-      const offset2 = y2 * w + shift;
-      for (let x = xStart; x < xEnd; x += 1) {
-        sum += Math.abs(gray[offset1 + x] - gray[offset2 + x]);
-      }
-      return sum / Math.max(1, xEnd - xStart);
+    function updateLabels() {
+      repeatPercentValue.textContent = `${repeatPercent.value}%`;
+      diffThresholdValue.textContent = diffThreshold.value;
+      binaryThresholdValue.textContent = binaryThreshold.value;
+      gridRowsValue.textContent = gridRows.value;
+      gridColsValue.textContent = gridCols.value;
+      changeCountValue.textContent = changeCount.value;
     }
-
-    function findRowShift(gray, w, y, y2) {
-      let best = Infinity;
-      let bestShift = 0;
-      for (let s = -SHIFT_TOL; s <= SHIFT_TOL; s += 1) {
-        const diff = rowDiff(gray, w, y, y2, s);
-        if (diff < best) {
-          best = diff;
-          bestShift = s;
-        }
-      }
-      return { best, bestShift };
-    }
-
-    function isRowRepeating(gray, w, y, repeats, shiftsOut) {
-      shiftsOut.length = 0;
-      for (let i = 1; i < repeats; i += 1) {
-        const y2 = y + i;
-        const { best, bestShift } = findRowShift(gray, w, y, y2);
-        if (best > ROW_DIFF_TOL) return false;
-        shiftsOut.push(bestShift);
-      }
-      return true;
-    }
-
-    function processFrame() {
-      if (!running) return;
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      if (!w || !h) {
-        rafId = requestAnimationFrame(processFrame);
-        return;
-      }
-
-      if (output.width !== w || output.height !== h) {
-        output.width = w;
-        output.height = h;
-      }
-
-      outCtx.drawImage(video, 0, 0, w, h);
-      const frame = outCtx.getImageData(0, 0, w, h);
-      const data = frame.data;
-      const gray = new Uint8Array(w * h);
-      for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-        gray[p] = (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11) | 0;
-      }
-
-      outCtx.putImageData(frame, 0, 0);
-      outCtx.fillStyle = '#22c55e';
-      const repeats = Number(repeatCount.value) || 2;
-      const limit = h - repeats + 1;
-      const shifts = [];
-      for (let y = 0; y < limit; y += 1) {
-        if (!isRowRepeating(gray, w, y, repeats, shifts)) continue;
-        const rowOffset = y * w;
-        for (let x = 0; x < w; x += 1) {
-          const v = gray[rowOffset + x];
-          let matches = 0;
-          for (let i = 0; i < shifts.length; i += 1) {
-            const y2 = y + i + 1;
-            const sx = x + shifts[i];
-            if (sx < 0 || sx >= w) continue;
-            const v2 = gray[y2 * w + sx];
-            if (Math.abs(v - v2) <= ROW_DIFF_TOL) matches += 1;
-          }
-          if (matches === shifts.length) {
-            outCtx.fillRect(x, y, 1, 1);
-          }
-        }
-      }
-
-      rafId = requestAnimationFrame(processFrame);
-    }
+    updateLabels();
 
     async function startCamera() {
       stopCamera();
@@ -217,6 +170,114 @@
       stopBtn.disabled = true;
     }
 
+    function countRowChanges(gray, w, y, xStart, xEnd, thresh) {
+      let current = gray[y * w + xStart] >= thresh ? 1 : 0;
+      let changes = 0;
+      for (let x = xStart + 1; x < xEnd; x += 1) {
+        const v = gray[y * w + x] >= thresh ? 1 : 0;
+        if (v !== current) {
+          changes += 1;
+          current = v;
+        }
+      }
+      return changes;
+    }
+
+    function rowHasNoSingletonRunLengths(gray, w, y, xStart, xEnd, thresh) {
+      const runCounts = { 0: Object.create(null), 1: Object.create(null) };
+      let current = gray[y * w + xStart] >= thresh ? 1 : 0;
+      let runLen = 1;
+      for (let x = xStart + 1; x < xEnd; x += 1) {
+        const v = gray[y * w + x] >= thresh ? 1 : 0;
+        if (v === current) {
+          runLen += 1;
+          continue;
+        }
+        runCounts[current][runLen] = (runCounts[current][runLen] || 0) + 1;
+        current = v;
+        runLen = 1;
+      }
+      runCounts[current][runLen] = (runCounts[current][runLen] || 0) + 1;
+
+      const checkBuckets = (bucket) => {
+        for (const len in bucket) {
+          if (bucket[len] === 1) return false;
+        }
+        return true;
+      };
+
+      return checkBuckets(runCounts[0]) && checkBuckets(runCounts[1]);
+    }
+
+    function processFrame() {
+      if (!running) return;
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) {
+        rafId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      if (output.width !== w || output.height !== h) {
+        output.width = w;
+        output.height = h;
+      }
+
+      outCtx.drawImage(video, 0, 0, w, h);
+      const frame = outCtx.getImageData(0, 0, w, h);
+      const data = frame.data;
+      const gray = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+        gray[p] = (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11) | 0;
+      }
+
+      outCtx.putImageData(frame, 0, 0);
+      outCtx.fillStyle = '#22c55e';
+
+      const repeatThreshold = (Number(repeatPercent.value) || 0) / 100;
+      const threshold = Number(diffThreshold.value) || 0;
+      const binThresh = Number(binaryThreshold.value) || 128;
+      const changeTarget = Number(changeCount.value) || 0;
+      const m = Number(gridRows.value) || 1;
+      const n = Number(gridCols.value) || 1;
+      const sectionH = Math.floor(h / m);
+      const sectionW = Math.floor(w / n);
+
+      for (let sy = 0; sy < m; sy += 1) {
+        const yStart = sy * sectionH;
+        const yEnd = sy === m - 1 ? h : yStart + sectionH;
+        for (let sx = 0; sx < n; sx += 1) {
+          const xStart = sx * sectionW;
+          const xEnd = sx === n - 1 ? w : xStart + sectionW;
+
+          const rowLimit = Math.min(yEnd, h - 1);
+          for (let y = yStart; y < rowLimit; y += 1) {
+            const rowOffset = y * w;
+            let matchCount = 0;
+            const rowWidth = xEnd - xStart;
+            for (let x = xStart; x < xEnd; x += 1) {
+              const v = gray[rowOffset + x];
+              const v2 = gray[(y + 1) * w + x];
+              if (Math.abs(v - v2) <= threshold) matchCount += 1;
+            }
+            const rowMatches = rowWidth > 0 && (matchCount / rowWidth) >= repeatThreshold;
+            const rowChanges = countRowChanges(gray, w, y, xStart, xEnd, binThresh) >= changeTarget;
+
+            if (requireRepeatRunCounts.checked) {
+              if (!rowHasNoSingletonRunLengths(gray, w, y, xStart, xEnd, binThresh)) {
+                continue;
+              }
+            }
+            if (rowMatches && rowChanges) {
+              outCtx.fillRect(xStart, y, xEnd - xStart, 1);
+            }
+          }
+        }
+      }
+
+      rafId = requestAnimationFrame(processFrame);
+    }
+
     startBtn.addEventListener('click', () => {
       startCamera().catch((err) => {
         console.error('Camera start failed:', err);
@@ -227,8 +288,16 @@
 
     stopBtn.addEventListener('click', stopCamera);
 
-    repeatCount.addEventListener('input', () => {
-      repeatCountValue.textContent = repeatCount.value;
+    repeatPercent.addEventListener('input', updateLabels);
+    diffThreshold.addEventListener('input', updateLabels);
+    binaryThreshold.addEventListener('input', updateLabels);
+    gridRows.addEventListener('input', updateLabels);
+    gridCols.addEventListener('input', updateLabels);
+    changeCount.addEventListener('input', updateLabels);
+
+    startCamera().catch((err) => {
+      console.error('Camera start failed:', err);
+      stopCamera();
     });
   </script>
 </body>
