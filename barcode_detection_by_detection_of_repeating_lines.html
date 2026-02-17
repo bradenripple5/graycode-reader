@@ -54,18 +54,39 @@
     .controls {
       margin-bottom: 12px;
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control-row {
+      display: flex;
       gap: 10px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
-    .controls label {
-      margin-right: 6px;
+    .control-row label {
+      min-width: 150px;
     }
 
-    .controls input[type="range"] {
-      width: 200px;
+    .control-row input[type="range"] {
+      width: 260px;
+      max-width: 100%;
       vertical-align: middle;
+      flex: 1 1 260px;
+    }
+
+    .status {
+      color: #9ca3af;
+      font-size: 14px;
+    }
+
+    .upload-row {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     canvas {
@@ -82,38 +103,89 @@
 
   <div class="panel">
     <div class="controls">
-      <button id="startBtn">Start Camera</button>
-      <button id="stopBtn" disabled>Stop Camera</button>
-      <label for="repeatPercent">Vertical Repeat %:</label>
-      <input id="repeatPercent" type="range" min="0" max="100" value="70" />
-      <span id="repeatPercentValue">70%</span>
-      <label for="diffThreshold">Diff Threshold:</label>
-      <input id="diffThreshold" type="range" min="0" max="80" value="18" />
-      <span id="diffThresholdValue">18</span>
-      <label for="binaryThreshold">Binary Threshold:</label>
-      <input id="binaryThreshold" type="range" min="0" max="255" value="128" />
-      <span id="binaryThresholdValue">128</span>
-      <label for="gridRows">Grid Rows (m):</label>
-      <input id="gridRows" type="range" min="1" max="12" value="10" />
-      <span id="gridRowsValue">10</span>
-      <label for="gridCols">Grid Cols (n):</label>
-      <input id="gridCols" type="range" min="1" max="12" value="10" />
-      <span id="gridColsValue">10</span>
-      <label for="changeCount">Change Count:</label>
-      <input id="changeCount" type="range" min="0" max="60" value="6" />
-      <span id="changeCountValue">6</span>
-      <label>
-        <input id="requireRepeatRunCounts" type="checkbox" />
-        Require repeat run counts
-      </label>
+      <div class="control-row">
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop Camera</button>
+      </div>
+      <div class="control-row">
+        <label for="resolutionSelect">Resolution:</label>
+        <select id="resolutionSelect">
+          <option value="3840x2160">4K (3840x2160)</option>
+          <option value="2560x1440">1440p (2560x1440)</option>
+          <option value="1920x1080" selected>1080p (1920x1080)</option>
+          <option value="1280x720">720p (1280x720)</option>
+          <option value="640x480">480p (640x480)</option>
+        </select>
+      </div>
+      <div class="control-row">
+        <label for="repeatPercent">Vertical Repeat %:</label>
+        <input id="repeatPercent" type="range" min="0" max="100" value="70" />
+        <span id="repeatPercentValue">70%</span>
+      </div>
+      <div class="control-row">
+        <label for="diffThreshold">Diff Threshold:</label>
+        <input id="diffThreshold" type="range" min="0" max="80" value="18" />
+        <span id="diffThresholdValue">18</span>
+      </div>
+      <div class="control-row">
+        <label for="binaryThreshold">Binary Threshold:</label>
+        <input id="binaryThreshold" type="range" min="0" max="255" value="128" />
+        <span id="binaryThresholdValue">128</span>
+      </div>
+      <div class="control-row">
+        <label for="gridRows">Grid Rows (m):</label>
+        <input id="gridRows" type="range" min="1" max="12" value="10" />
+        <span id="gridRowsValue">10</span>
+      </div>
+      <div class="control-row">
+        <label for="gridCols">Grid Cols (n):</label>
+        <input id="gridCols" type="range" min="1" max="12" value="10" />
+        <span id="gridColsValue">10</span>
+      </div>
+      <div class="control-row">
+        <label for="changeCount">Change Count:</label>
+        <input id="changeCount" type="range" min="0" max="60" value="6" />
+        <span id="changeCountValue">6</span>
+      </div>
+      <div class="control-row">
+        <label for="scale">Processing Scale:</label>
+        <input id="scale" type="range" min="0.1" max="1" step="0.05" value="0.5" />
+        <span id="scaleValue">0.5</span>
+      </div>
+      <div class="control-row">
+        <label for="frameSkip">Frame Skip:</label>
+        <input id="frameSkip" type="range" min="1" max="10" step="1" value="2" />
+        <span id="frameSkipValue">2</span>
+      </div>
+      <div class="control-row">
+        <label for="minRows">Min Rows %:</label>
+        <input id="minRows" type="range" min="0" max="100" step="5" value="100" />
+        <span id="minRowsValue">100%</span>
+      </div>
+      <div class="control-row">
+        <label>
+          <input id="requireRepeatRunCounts" type="checkbox" />
+          Require repeat run counts
+        </label>
+      </div>
+      <div class="control-row">
+        <div class="status" id="resolution">Resolution: 0 x 0</div>
+      </div>
     </div>
     <video id="video" playsinline autoplay muted></video>
     <canvas id="output"></canvas>
+    <div class="upload-row">
+      <label for="uploadInput">Upload:</label>
+      <input id="uploadInput" type="file" accept="image/*" />
+      <button id="uploadBtn" type="button">Send File</button>
+      <span class="status" id="uploadStatus">No file uploaded</span>
+    </div>
   </div>
 
   <script>
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const resolutionSelect = document.getElementById('resolutionSelect');
     const video = document.getElementById('video');
     const repeatPercent = document.getElementById('repeatPercent');
     const repeatPercentValue = document.getElementById('repeatPercentValue');
@@ -127,13 +199,28 @@
     const gridColsValue = document.getElementById('gridColsValue');
     const changeCount = document.getElementById('changeCount');
     const changeCountValue = document.getElementById('changeCountValue');
+    const scale = document.getElementById('scale');
+    const scaleValue = document.getElementById('scaleValue');
+    const frameSkip = document.getElementById('frameSkip');
+    const frameSkipValue = document.getElementById('frameSkipValue');
+    const uploadInput = document.getElementById('uploadInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const minRows = document.getElementById('minRows');
+    const minRowsValue = document.getElementById('minRowsValue');
     const requireRepeatRunCounts = document.getElementById('requireRepeatRunCounts');
+    const resolution = document.getElementById('resolution');
     const output = document.getElementById('output');
     const outCtx = output.getContext('2d', { willReadFrequently: true });
 
     let stream = null;
     let running = false;
     let rafId = 0;
+    let frameCounter = 0;
+    const appConfig = {
+      uploadHost: window.location.hostname,
+      uploadPort: 8000
+    };
 
     function updateLabels() {
       repeatPercentValue.textContent = `${repeatPercent.value}%`;
@@ -142,13 +229,40 @@
       gridRowsValue.textContent = gridRows.value;
       gridColsValue.textContent = gridCols.value;
       changeCountValue.textContent = changeCount.value;
+      scaleValue.textContent = scale.value;
+      frameSkipValue.textContent = frameSkip.value;
+      minRowsValue.textContent = `${minRows.value}%`;
     }
     updateLabels();
 
+    async function loadConfig() {
+      try {
+        const res = await fetch('/app_config.json', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          if (typeof data.uploadHost === 'string' && data.uploadHost.trim()) {
+            appConfig.uploadHost = data.uploadHost.trim();
+          }
+          if (typeof data.uploadPort === 'number' && data.uploadPort > 0) {
+            appConfig.uploadPort = data.uploadPort;
+          }
+        }
+      } catch (err) {
+        console.warn('Config load failed', err);
+      }
+    }
+
     async function startCamera() {
       stopCamera();
+      const selectedResolution = resolutionSelect.value || '1920x1080';
+      const [width, height] = selectedResolution.split('x').map((v) => Number(v) || 0);
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: {
+          facingMode: 'environment',
+          width: { ideal: width || 1920 },
+          height: { ideal: height || 1080 }
+        },
         audio: false
       });
       video.srcObject = stream;
@@ -218,15 +332,28 @@
         return;
       }
 
-      if (output.width !== w || output.height !== h) {
-        output.width = w;
-        output.height = h;
+      resolution.textContent = `Resolution: ${w} x ${h}`;
+
+      frameCounter += 1;
+      const skip = Math.max(1, Number(frameSkip.value) || 1);
+      if (frameCounter % skip !== 0) {
+        rafId = requestAnimationFrame(processFrame);
+        return;
       }
 
-      outCtx.drawImage(video, 0, 0, w, h);
-      const frame = outCtx.getImageData(0, 0, w, h);
+      const s = Math.max(0.1, Math.min(1, Number(scale.value) || 1));
+      const sw = Math.max(1, Math.round(w * s));
+      const sh = Math.max(1, Math.round(h * s));
+
+      if (output.width !== sw || output.height !== sh) {
+        output.width = sw;
+        output.height = sh;
+      }
+
+      outCtx.drawImage(video, 0, 0, sw, sh);
+      const frame = outCtx.getImageData(0, 0, sw, sh);
       const data = frame.data;
-      const gray = new Uint8Array(w * h);
+      const gray = new Uint8Array(sw * sh);
       for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
         gray[p] = (data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11) | 0;
       }
@@ -240,36 +367,46 @@
       const changeTarget = Number(changeCount.value) || 0;
       const m = Number(gridRows.value) || 1;
       const n = Number(gridCols.value) || 1;
-      const sectionH = Math.floor(h / m);
-      const sectionW = Math.floor(w / n);
+      const sectionH = Math.floor(sh / m);
+      const sectionW = Math.floor(sw / n);
 
       for (let sy = 0; sy < m; sy += 1) {
         const yStart = sy * sectionH;
-        const yEnd = sy === m - 1 ? h : yStart + sectionH;
+        const yEnd = sy === m - 1 ? sh : yStart + sectionH;
         for (let sx = 0; sx < n; sx += 1) {
           const xStart = sx * sectionW;
-          const xEnd = sx === n - 1 ? w : xStart + sectionW;
+          const xEnd = sx === n - 1 ? sw : xStart + sectionW;
 
-          const rowLimit = Math.min(yEnd, h - 1);
+          const rowLimit = Math.min(yEnd, sh - 1);
+          const rowPasses = [];
+          let passCount = 0;
           for (let y = yStart; y < rowLimit; y += 1) {
-            const rowOffset = y * w;
+            const rowOffset = y * sw;
             let matchCount = 0;
             const rowWidth = xEnd - xStart;
             for (let x = xStart; x < xEnd; x += 1) {
               const v = gray[rowOffset + x];
-              const v2 = gray[(y + 1) * w + x];
+              const v2 = gray[(y + 1) * sw + x];
               if (Math.abs(v - v2) <= threshold) matchCount += 1;
             }
             const rowMatches = rowWidth > 0 && (matchCount / rowWidth) >= repeatThreshold;
-            const rowChanges = countRowChanges(gray, w, y, xStart, xEnd, binThresh) >= changeTarget;
+            const rowChanges = countRowChanges(gray, sw, y, xStart, xEnd, binThresh) >= changeTarget;
 
+            let runCountsOk = true;
             if (requireRepeatRunCounts.checked) {
-              if (!rowHasNoSingletonRunLengths(gray, w, y, xStart, xEnd, binThresh)) {
-                continue;
-              }
+              runCountsOk = rowHasNoSingletonRunLengths(gray, sw, y, xStart, xEnd, binThresh);
             }
-            if (rowMatches && rowChanges) {
-              outCtx.fillRect(xStart, y, xEnd - xStart, 1);
+            const rowPass = rowMatches && rowChanges && runCountsOk;
+            rowPasses.push(rowPass);
+            if (rowPass) passCount += 1;
+          }
+
+          const rowTotal = rowPasses.length || 1;
+          const requiredRows = Math.ceil((Number(minRows.value) || 0) / 100 * rowTotal);
+          if (passCount >= requiredRows) {
+            for (let i = 0; i < rowPasses.length; i += 1) {
+              if (!rowPasses[i]) continue;
+              outCtx.fillRect(xStart, yStart + i, xEnd - xStart, 1);
             }
           }
         }
@@ -294,6 +431,46 @@
     gridRows.addEventListener('input', updateLabels);
     gridCols.addEventListener('input', updateLabels);
     changeCount.addEventListener('input', updateLabels);
+    scale.addEventListener('input', updateLabels);
+    frameSkip.addEventListener('input', updateLabels);
+    minRows.addEventListener('input', updateLabels);
+    resolutionSelect.addEventListener('change', () => {
+      if (!running) return;
+      startCamera().catch((err) => {
+        console.error('Camera restart failed:', err);
+        stopCamera();
+        alert('Unable to change camera resolution. Check permissions and try again.');
+      });
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      const file = uploadInput.files && uploadInput.files[0];
+      if (!file) {
+        uploadStatus.textContent = 'Select a file first';
+        return;
+      }
+      uploadStatus.textContent = 'Uploading...';
+      const form = new FormData();
+      form.append('file', file, file.name);
+      try {
+        const uploadUrl = `http://${appConfig.uploadHost}:${appConfig.uploadPort}/upload-image`;
+        const res = await fetch(uploadUrl, {
+          method: 'POST',
+          body: form
+        });
+        if (!res.ok) {
+          uploadStatus.textContent = `Upload failed (${res.status})`;
+          return;
+        }
+        const data = await res.json();
+        uploadStatus.textContent = `Saved: ${data.file || file.name}`;
+      } catch (err) {
+        console.error(err);
+        uploadStatus.textContent = 'Upload error';
+      }
+    });
+
+    loadConfig();
 
     startCamera().catch((err) => {
       console.error('Camera start failed:', err);

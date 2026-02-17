@@ -1,0 +1,21 @@
+{
+  "updated_at_utc": "2026-02-16T22:04:29.207252+00:00",
+  "input_image": "current app pictures/traditional_frame_2026-02-16T22-02-59-280Z.png",
+  "frames_used": 1,
+  "candidates_count": 0,
+  "status": "no_barcode_found",
+  "best_code": null,
+  "best_score": null,
+  "best_module_estimate": null,
+  "best_quant_error": null,
+  "best_window_center_x": null,
+  "best_center_proximity": null,
+  "focus_laplacian_var": 0.0006026675109751523,
+  "focus_edge_x_mean": 0.0006948016816750169,
+  "blur_detected": true,
+  "used_blur_recovery": true,
+  "external_decoders": {
+    "opencv_barcode": null,
+    "pyzbar": null
+  }
+}

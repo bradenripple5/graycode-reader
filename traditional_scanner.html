@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Traditional Scanner</title>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --panel: #1a232d;
+        --text: #e8edf2;
+        --muted: #9fb0c0;
+        --ok: #2ecc71;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+
+      .app {
+        width: min(980px, 100%);
+        background: var(--panel);
+        border: 1px solid #2b3948;
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 22px;
+      }
+
+      .outputs {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .output-row {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 14px;
+      }
+
+      .output-name {
+        min-width: 170px;
+        color: var(--muted);
+      }
+
+      .output-value.ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      button,
+      select {
+        background: #121a22;
+        color: var(--text);
+        border: 1px solid #354659;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 14px;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      label {
+        font-size: 14px;
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .viewport {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border: 1px solid #2b3948;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      video,
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .status {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .json-block {
+        margin-top: 10px;
+        border: 1px solid #354659;
+        border-radius: 8px;
+        background: #10171f;
+        padding: 10px;
+      }
+
+      .json-title {
+        margin: 0 0 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .json-content {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #d8e3ee;
+      }
+
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <h1>Traditional Scanner</h1>
+
+      <div class="outputs">
+        <div class="output-row"><span class="output-name">Custom Scanner:</span><span id="outCustom" class="output-value">—</span></div>
+        <div class="output-row"><span class="output-name">ZXing:</span><span id="outZXing" class="output-value">—</span></div>
+        <div class="output-row"><span class="output-name">Native BarcodeDetector:</span><span id="outNative" class="output-value">—</span></div>
+      </div>
+
+      <div class="controls">
+        <select id="cameraSelect"></select>
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn">Stop Camera</button>
+        <label>
+          Zoom
+          <input id="zoomSlider" type="range" min="1" max="1" step="0.1" value="1" disabled />
+          <span id="zoomValue">1.0x</span>
+        </label>
+        <label><input id="useCustom" type="checkbox" checked /> Use Custom</label>
+        <label><input id="useZXing" type="checkbox" checked /> Use ZXing</label>
+        <label><input id="useNative" type="checkbox" checked /> Use Native</label>
+        <label><input id="averageTenRows" type="checkbox" /> Average each 10 rows</label>
+      </div>
+
+      <div class="viewport">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <div class="status" id="status">Status: Idle</div>
+      <div class="status" id="uploadStatus">Uploads: 0 (idle)</div>
+      <div class="json-block">
+        <div class="json-title">result.json</div>
+        <pre id="resultJsonOutput" class="json-content">Loading...</pre>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+    <script>
+      const video = document.getElementById("video");
+      const overlay = document.getElementById("overlay");
+      const overlayCtx = overlay.getContext("2d");
+      const statusEl = document.getElementById("status");
+      const cameraSelect = document.getElementById("cameraSelect");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const zoomSlider = document.getElementById("zoomSlider");
+      const zoomValue = document.getElementById("zoomValue");
+      const useCustom = document.getElementById("useCustom");
+      const useZXing = document.getElementById("useZXing");
+      const useNative = document.getElementById("useNative");
+      const averageTenRows = document.getElementById("averageTenRows");
+      const uploadStatusEl = document.getElementById("uploadStatus");
+      const outCustom = document.getElementById("outCustom");
+      const outZXing = document.getElementById("outZXing");
+      const outNative = document.getElementById("outNative");
+      const resultJsonOutput = document.getElementById("resultJsonOutput");
+
+      const frameCanvas = document.createElement("canvas");
+      const frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
+      const roiCanvas = document.createElement("canvas");
+      const roiCtx = roiCanvas.getContext("2d", { willReadFrequently: true });
+      const viewCanvas = document.createElement("canvas");
+      const viewCtx = viewCanvas.getContext("2d", { willReadFrequently: true });
+
+      const L_CODES = {
+        "0001101": "0",
+        "0011001": "1",
+        "0010011": "2",
+        "0111101": "3",
+        "0100011": "4",
+        "0110001": "5",
+        "0101111": "6",
+        "0111011": "7",
+        "0110111": "8",
+        "0001011": "9"
+      };
+      const R_CODES = {
+        "1110010": "0",
+        "1100110": "1",
+        "1101100": "2",
+        "1000010": "3",
+        "1011100": "4",
+        "1001110": "5",
+        "1010000": "6",
+        "1000100": "7",
+        "1001000": "8",
+        "1110100": "9"
+      };
+
+      let stream = null;
+      let rafId = 0;
+      let lastScanTime = 0;
+      const scanIntervalMs = 240;
+      let zxingReader = null;
+      let nativeDetector = null;
+      let scanningZXing = false;
+      let scanningNative = false;
+      let nativeOverlayDetections = [];
+      let nativeOverlayTime = 0;
+      let uploadIntervalId = 0;
+      let uploadInFlight = false;
+      let resultJsonInterval = 0;
+      let uploadCount = 0;
+      let activeVideoTrack = null;
+
+      function setStatus(text) {
+        statusEl.textContent = `Status: ${text}`;
+      }
+
+      function setOutput(el, value, ok) {
+        el.textContent = value;
+        el.className = ok ? "output-value ok" : "output-value";
+      }
+
+      function setUploadStatus(text) {
+        uploadStatusEl.textContent = `Uploads: ${uploadCount} (${text})`;
+      }
+
+      function setZoomUi(value, enabled) {
+        const z = Number.isFinite(value) ? value : 1;
+        zoomValue.textContent = `${z.toFixed(1)}x`;
+        zoomSlider.disabled = !enabled;
+      }
+
+      async function configureZoom(track) {
+        activeVideoTrack = track || null;
+        if (!track || typeof track.getCapabilities !== "function") {
+          zoomSlider.min = "1";
+          zoomSlider.max = "1";
+          zoomSlider.step = "0.1";
+          zoomSlider.value = "1";
+          setZoomUi(1, false);
+          return;
+        }
+        const caps = track.getCapabilities() || {};
+        const settings = typeof track.getSettings === "function" ? track.getSettings() : {};
+        const min = Number.isFinite(caps.zoom?.min) ? caps.zoom.min : 1;
+        const max = Number.isFinite(caps.zoom?.max) ? caps.zoom.max : 1;
+        const step = Number.isFinite(caps.zoom?.step) && caps.zoom.step > 0 ? caps.zoom.step : 0.1;
+        const current = Number.isFinite(settings.zoom) ? settings.zoom : min;
+
+        zoomSlider.min = String(min);
+        zoomSlider.max = String(max);
+        zoomSlider.step = String(step);
+        zoomSlider.value = String(Math.min(max, Math.max(min, current)));
+        setZoomUi(Number(zoomSlider.value), max > min + 1e-6);
+      }
+
+      async function applyZoom(value) {
+        if (!activeVideoTrack) return;
+        const v = Number(value);
+        if (!Number.isFinite(v)) return;
+        try {
+          await activeVideoTrack.applyConstraints({ advanced: [{ zoom: v }] });
+          const settings = typeof activeVideoTrack.getSettings === "function" ? activeVideoTrack.getSettings() : {};
+          const actual = Number.isFinite(settings.zoom) ? settings.zoom : v;
+          zoomSlider.value = String(actual);
+          setZoomUi(actual, !zoomSlider.disabled);
+        } catch (err) {
+          console.warn("zoom not applied", err);
+          setStatus(`Zoom unsupported: ${err.message || err}`);
+        }
+      }
+
+      async function loadResultJson() {
+        try {
+          const res = await fetch(`/barcode_reconstruct_out/result.json?ts=${Date.now()}`, { cache: "no-store" });
+          if (!res.ok) {
+            resultJsonOutput.textContent = `result.json fetch failed: HTTP ${res.status}`;
+            return;
+          }
+          const data = await res.json();
+          resultJsonOutput.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          resultJsonOutput.textContent = `Unable to load result.json: ${err}`;
+        }
+      }
+
+      function decodeUpcFromModules(bits95) {
+        if (bits95.length !== 95) return null;
+        const start = bits95.slice(0, 3).join("");
+        const middle = bits95.slice(45, 50).join("");
+        const end = bits95.slice(92, 95).join("");
+        if (start !== "101" || middle !== "01010" || end !== "101") return null;
+
+        let digits = "";
+        for (let i = 0; i < 6; i += 1) {
+          const seg = bits95.slice(3 + i * 7, 3 + (i + 1) * 7).join("");
+          if (!(seg in L_CODES)) return null;
+          digits += L_CODES[seg];
+        }
+        for (let i = 0; i < 6; i += 1) {
+          const seg = bits95.slice(50 + i * 7, 50 + (i + 1) * 7).join("");
+          if (!(seg in R_CODES)) return null;
+          digits += R_CODES[seg];
+        }
+
+        const nums = digits.split("").map((d) => Number(d));
+        const odd = nums[0] + nums[2] + nums[4] + nums[6] + nums[8] + nums[10];
+        const even = nums[1] + nums[3] + nums[5] + nums[7] + nums[9] + nums[11];
+        if (((odd * 3 + even) % 10) !== 0) return null;
+        return digits;
+      }
+
+      function buildBinaryRow(imageData, w, y) {
+        let sum = 0;
+        for (let x = 0; x < w; x += 1) {
+          const i = (y * w + x) * 4;
+          sum += imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+        }
+        const threshold = sum / w;
+        const bits = new Uint8Array(w);
+        for (let x = 0; x < w; x += 1) {
+          const i = (y * w + x) * 4;
+          const lum = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
+          bits[x] = lum < threshold ? 1 : 0;
+        }
+        return bits;
+      }
+
+      function customDecodeRoi(imageData, w, h) {
+        const center = Math.floor(h / 2);
+        const rowOffsets = [0, -2, 2, -5, 5, -9, 9, -14, 14];
+
+        for (const off of rowOffsets) {
+          const y = center + off;
+          if (y < 0 || y >= h) continue;
+
+          const bits = buildBinaryRow(imageData, w, y);
+          const runs = [];
+          let cur = bits[0];
+          let len = 1;
+          for (let x = 1; x < w; x += 1) {
+            if (bits[x] === cur) {
+              len += 1;
+            } else {
+              runs.push({ bit: cur, len });
+              cur = bits[x];
+              len = 1;
+            }
+          }
+          runs.push({ bit: cur, len });
+          if (runs.length < 20) continue;
+
+          const sorted = runs.map((r) => r.len).filter((n) => n > 0).sort((a, b) => a - b);
+          const k = Math.max(6, Math.min(16, Math.floor(sorted.length * 0.25)));
+          let base = 0;
+          for (let i = 0; i < k; i += 1) base += sorted[i];
+          base /= k;
+          if (!base || !Number.isFinite(base)) continue;
+
+          let modules = "";
+          for (const run of runs) {
+            const count = Math.max(1, Math.min(12, Math.round(run.len / base)));
+            modules += String(run.bit).repeat(count);
+          }
+          if (modules.length < 95) continue;
+
+          for (let i = 0; i + 95 <= modules.length; i += 1) {
+            const chunk = modules.slice(i, i + 95).split("");
+            const upc = decodeUpcFromModules(chunk);
+            if (upc) return upc;
+          }
+        }
+        return null;
+      }
+
+      function ensureZXing() {
+        if (!zxingReader && window.ZXing && window.ZXing.BrowserMultiFormatReader) {
+          zxingReader = new window.ZXing.BrowserMultiFormatReader();
+        }
+      }
+
+      async function ensureNativeDetector() {
+        if (nativeDetector) return nativeDetector;
+        if (!("BarcodeDetector" in window)) return null;
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        nativeDetector = new window.BarcodeDetector({
+          formats: formats.length ? formats : undefined
+        });
+        return nativeDetector;
+      }
+
+      function getScanSquare(w, h) {
+        const size = Math.floor(Math.min(w, h) * 0.65);
+        return {
+          x: Math.floor((w - size) / 2),
+          y: Math.floor((h - size) / 2),
+          size
+        };
+      }
+
+      function getCoverTransform(sw, sh, dw, dh) {
+        const srcAspect = sw / sh;
+        const dstAspect = dw / dh;
+        if (srcAspect > dstAspect) {
+          const cw = sh * dstAspect;
+          return { sx: (sw - cw) / 2, sy: 0, cw, ch: sh };
+        }
+        const ch = sw / dstAspect;
+        return { sx: 0, sy: (sh - ch) / 2, cw: sw, ch };
+      }
+
+      function mapVideoRectToOverlay(x, y, rw, rh, tf, dw, dh) {
+        const dx = ((x - tf.sx) / tf.cw) * dw;
+        const dy = ((y - tf.sy) / tf.ch) * dh;
+        const dwRect = (rw / tf.cw) * dw;
+        const dhRect = (rh / tf.ch) * dh;
+        return { x: dx, y: dy, w: dwRect, h: dhRect };
+      }
+
+      function averageRowBlocks(imageData, w, h, rowsPerBlock) {
+        const data = imageData.data;
+        const block = Math.max(1, rowsPerBlock | 0);
+        for (let y0 = 0; y0 < h; y0 += block) {
+          const y1 = Math.min(h, y0 + block);
+          for (let x = 0; x < w; x += 1) {
+            let r = 0;
+            let g = 0;
+            let b = 0;
+            let a = 0;
+            const count = y1 - y0;
+            for (let y = y0; y < y1; y += 1) {
+              const i = (y * w + x) * 4;
+              r += data[i];
+              g += data[i + 1];
+              b += data[i + 2];
+              a += data[i + 3];
+            }
+            const rr = Math.round(r / count);
+            const gg = Math.round(g / count);
+            const bb = Math.round(b / count);
+            const aa = Math.round(a / count);
+            for (let y = y0; y < y1; y += 1) {
+              const i = (y * w + x) * 4;
+              data[i] = rr;
+              data[i + 1] = gg;
+              data[i + 2] = bb;
+              data[i + 3] = aa;
+            }
+          }
+        }
+      }
+
+      function resizeOverlay() {
+        const rect = video.getBoundingClientRect();
+        overlay.width = Math.max(1, Math.floor(rect.width));
+        overlay.height = Math.max(1, Math.floor(rect.height));
+      }
+
+      async function listCameras() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        cameraSelect.innerHTML = "";
+
+        const auto = document.createElement("option");
+        auto.value = "";
+        auto.textContent = "Auto (Rear Camera)";
+        cameraSelect.appendChild(auto);
+
+        cams.forEach((cam, i) => {
+          const opt = document.createElement("option");
+          opt.value = cam.deviceId;
+          opt.textContent = cam.label || `Camera ${i + 1}`;
+          cameraSelect.appendChild(opt);
+        });
+        cameraSelect.value = "";
+      }
+
+      async function startCamera() {
+        try {
+          stopCamera();
+          const selectedId = cameraSelect.value;
+          const highRes = { width: { ideal: 3840 }, height: { ideal: 2160 } };
+          const constraints = selectedId
+            ? { deviceId: { exact: selectedId }, ...highRes }
+            : { facingMode: { ideal: "environment" }, ...highRes };
+
+          stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+          const tracks = stream.getVideoTracks();
+          activeVideoTrack = tracks.length ? tracks[0] : null;
+          await configureZoom(activeVideoTrack);
+          video.srcObject = stream;
+          await video.play();
+          resizeOverlay();
+          setStatus("Camera running");
+          runLoop();
+          startPeriodicUpload();
+        } catch (err) {
+          console.error(err);
+          setStatus(`Camera error: ${err.message}`);
+        }
+      }
+
+      function stopCamera() {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if (stream) {
+          stream.getTracks().forEach((t) => t.stop());
+          stream = null;
+        }
+        activeVideoTrack = null;
+        configureZoom(null);
+        stopPeriodicUpload();
+        video.srcObject = null;
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        setStatus("Stopped");
+      }
+
+      async function uploadCurrentFrame() {
+        if (!stream || !video.videoWidth || !video.videoHeight || uploadInFlight) return;
+        uploadInFlight = true;
+        setUploadStatus("uploading");
+        try {
+          const w = video.videoWidth;
+          const h = video.videoHeight;
+          if (frameCanvas.width !== w || frameCanvas.height !== h) {
+            frameCanvas.width = w;
+            frameCanvas.height = h;
+          }
+          frameCtx.drawImage(video, 0, 0, w, h);
+
+          const blob = await new Promise((resolve) => {
+            frameCanvas.toBlob((b) => resolve(b), "image/png");
+          });
+          if (!blob) return;
+
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const name = `traditional_frame_${ts}.png`;
+          const form = new FormData();
+          form.append("file", blob, name);
+
+          const res = await fetch("/upload-image", {
+            method: "POST",
+            body: form
+          });
+          if (!res.ok) {
+            setUploadStatus(`failed HTTP ${res.status}`);
+            return;
+          }
+          uploadCount += 1;
+          setUploadStatus("ok");
+        } catch (err) {
+          console.error("frame upload failed", err);
+          setUploadStatus("network error");
+        } finally {
+          uploadInFlight = false;
+        }
+      }
+
+      function startPeriodicUpload() {
+        stopPeriodicUpload();
+        setUploadStatus("running");
+        uploadIntervalId = window.setInterval(() => {
+          uploadCurrentFrame();
+        }, 1000);
+      }
+
+      function stopPeriodicUpload() {
+        if (uploadIntervalId) {
+          window.clearInterval(uploadIntervalId);
+          uploadIntervalId = 0;
+        }
+        setUploadStatus("stopped");
+      }
+
+      function runLoop() {
+        if (rafId) cancelAnimationFrame(rafId);
+        const tick = () => {
+          rafId = requestAnimationFrame(tick);
+          if (!stream || !video.videoWidth || !video.videoHeight) return;
+
+          const w = video.videoWidth;
+          const h = video.videoHeight;
+          if (frameCanvas.width !== w || frameCanvas.height !== h) {
+            frameCanvas.width = w;
+            frameCanvas.height = h;
+          }
+          frameCtx.drawImage(video, 0, 0, w, h);
+
+          const sq = getScanSquare(w, h);
+          const roiData = frameCtx.getImageData(sq.x, sq.y, sq.size, sq.size);
+          if (roiCanvas.width !== sq.size || roiCanvas.height !== sq.size) {
+            roiCanvas.width = sq.size;
+            roiCanvas.height = sq.size;
+          }
+          roiCtx.putImageData(roiData, 0, 0);
+
+          const ow = overlay.width;
+          const oh = overlay.height;
+          const tf = getCoverTransform(w, h, ow, oh);
+          const sqRect = mapVideoRectToOverlay(sq.x, sq.y, sq.size, sq.size, tf, ow, oh);
+          overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+          if (averageTenRows.checked) {
+            if (viewCanvas.width !== ow || viewCanvas.height !== oh) {
+              viewCanvas.width = ow;
+              viewCanvas.height = oh;
+            }
+            // Render exactly what the camera view shows (cover fit) into overlay-pixel space.
+            viewCtx.drawImage(frameCanvas, tf.sx, tf.sy, tf.cw, tf.ch, 0, 0, ow, oh);
+            const viewImage = viewCtx.getImageData(0, 0, ow, oh);
+            // For each column and each 10-row block, set all rows in block to the same average pixel.
+            averageRowBlocks(viewImage, ow, oh, 10);
+            viewCtx.putImageData(viewImage, 0, 0);
+            overlayCtx.save();
+            overlayCtx.globalAlpha = 1;
+            overlayCtx.drawImage(viewCanvas, 0, 0);
+            overlayCtx.restore();
+          }
+          overlayCtx.strokeStyle = "rgba(46, 204, 113, 0.95)";
+          overlayCtx.lineWidth = 2;
+          overlayCtx.strokeRect(sqRect.x, sqRect.y, sqRect.w, sqRect.h);
+
+          // Draw recent native detections within the scan square.
+          if (nativeOverlayDetections.length && performance.now() - nativeOverlayTime < 1200) {
+            overlayCtx.save();
+            overlayCtx.strokeStyle = "rgba(255, 204, 0, 0.95)";
+            overlayCtx.fillStyle = "rgba(255, 204, 0, 0.95)";
+            overlayCtx.lineWidth = 2;
+            overlayCtx.font = "16px IBM Plex Sans, Segoe UI, Arial, sans-serif";
+            overlayCtx.textBaseline = "bottom";
+
+            for (const hit of nativeOverlayDetections) {
+              const hitRect = mapVideoRectToOverlay(
+                sq.x + hit.x,
+                sq.y + hit.y,
+                hit.w,
+                hit.h,
+                tf,
+                ow,
+                oh
+              );
+              overlayCtx.strokeRect(hitRect.x, hitRect.y, hitRect.w, hitRect.h);
+
+              // Always show detected value text when available.
+              const label = hit.text || "";
+              if (label) {
+                const tx = hitRect.x;
+                const ty = Math.max(16, hitRect.y - 6);
+                const padX = 6;
+                const padY = 4;
+                const tw = overlayCtx.measureText(label).width;
+                const th = 16;
+                overlayCtx.fillStyle = "rgba(0, 0, 0, 0.72)";
+                overlayCtx.fillRect(tx - padX, ty - th - padY, tw + padX * 2, th + padY);
+                overlayCtx.fillStyle = "rgba(255, 240, 120, 0.98)";
+                overlayCtx.fillText(label, tx, ty);
+                overlayCtx.fillStyle = "rgba(255, 204, 0, 0.95)";
+              }
+            }
+            overlayCtx.restore();
+          }
+
+          const now = performance.now();
+          if (now - lastScanTime < scanIntervalMs) return;
+          lastScanTime = now;
+
+          if (useCustom.checked) {
+            const found = customDecodeRoi(roiData.data, sq.size, sq.size);
+            setOutput(outCustom, found || "—", Boolean(found));
+          } else {
+            setOutput(outCustom, "Disabled", false);
+          }
+
+          if (useZXing.checked) {
+            ensureZXing();
+            if (!zxingReader) {
+              setOutput(outZXing, "Unavailable", false);
+            } else if (!scanningZXing) {
+              scanningZXing = true;
+              (async () => {
+                try {
+                  const result = await zxingReader.decodeFromImageData(roiData);
+                  const text = result && result.text ? result.text : "—";
+                  setOutput(outZXing, text, text !== "—");
+                } catch (_) {
+                  setOutput(outZXing, "—", false);
+                } finally {
+                  scanningZXing = false;
+                }
+              })();
+            }
+          } else {
+            setOutput(outZXing, "Disabled", false);
+          }
+
+          if (useNative.checked) {
+            if (!scanningNative) {
+              scanningNative = true;
+              (async () => {
+                try {
+                  const detector = await ensureNativeDetector();
+                  if (!detector) {
+                    setOutput(outNative, "Unsupported", false);
+                    nativeOverlayDetections = [];
+                  } else {
+                    const hits = await detector.detect(roiCanvas);
+                    const text = hits && hits.length && hits[0].rawValue ? hits[0].rawValue : "—";
+                    setOutput(outNative, text, text !== "—");
+                    nativeOverlayDetections = (hits || [])
+                      .map((h) => {
+                        const bb = h.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
+                        return {
+                          text: h.rawValue || "",
+                          x: bb.x || 0,
+                          y: bb.y || 0,
+                          w: bb.width || 0,
+                          h: bb.height || 0
+                        };
+                      })
+                      .filter((h) => h.w > 0 && h.h > 0);
+                    nativeOverlayTime = performance.now();
+                  }
+                } catch (_) {
+                  setOutput(outNative, "—", false);
+                  nativeOverlayDetections = [];
+                } finally {
+                  scanningNative = false;
+                }
+              })();
+            }
+          } else {
+            setOutput(outNative, "Disabled", false);
+            nativeOverlayDetections = [];
+          }
+        };
+        tick();
+      }
+
+      startBtn.addEventListener("click", startCamera);
+      stopBtn.addEventListener("click", stopCamera);
+      zoomSlider.addEventListener("input", () => {
+        setZoomUi(Number(zoomSlider.value), !zoomSlider.disabled);
+      });
+      zoomSlider.addEventListener("change", () => {
+        applyZoom(zoomSlider.value);
+      });
+      cameraSelect.addEventListener("change", () => {
+        if (!stream) return;
+        startCamera();
+      });
+
+      navigator.mediaDevices.addEventListener("devicechange", listCameras);
+      window.addEventListener("resize", resizeOverlay);
+      video.addEventListener("loadedmetadata", resizeOverlay);
+
+      listCameras()
+        .then(() => startCamera())
+        .catch(() => setStatus("No camera access"));
+      loadResultJson();
+      resultJsonInterval = window.setInterval(loadResultJson, 2000);
+    </script>
+  </body>
+</html>

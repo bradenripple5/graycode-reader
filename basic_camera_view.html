@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Barcode Finder</title>
+    <title>Basic Camera View</title>
     <style>
       :root {
         --bg: #101418;
@@ -146,7 +146,7 @@
   </head>
   <body>
     <div class="app">
-      <h1 class="title">Barcode Finder</h1>
+      <h1 class="title">Basic Camera View</h1>
 
       <div class="controls">
         <div class="control-row">
@@ -170,9 +170,9 @@
         <div class="repeat-panel">
           <div class="repeat-header">
             <strong>Row Repeat Finder</strong>
-            <button id="repeatToggleBtn" type="button" aria-expanded="true">-</button>
+            <button id="repeatToggleBtn" type="button" aria-expanded="false">+</button>
           </div>
-          <div id="repeatControls" class="repeat-controls">
+          <div id="repeatControls" class="repeat-controls collapsed">
             <div class="control-row">
               <label>
                 <input id="enableRowRepeat" type="checkbox" />
@@ -180,39 +180,14 @@
               </label>
             </div>
             <div class="control-row">
-              <label for="repeatAccuracy">Section repeat %:</label>
+              <label for="repeatDepth">Consecutive rows (n):</label>
+              <input id="repeatDepth" type="range" min="1" max="25" value="5" />
+              <span id="repeatDepthValue">5</span>
+            </div>
+            <div class="control-row">
+              <label for="repeatAccuracy">Row accuracy %:</label>
               <input id="repeatAccuracy" type="range" min="40" max="100" value="85" />
               <span id="repeatAccuracyValue">85%</span>
-            </div>
-            <div class="control-row">
-              <label for="binaryThreshold">Binary threshold:</label>
-              <input id="binaryThreshold" type="range" min="0" max="255" value="128" />
-              <span id="binaryThresholdValue">128</span>
-            </div>
-            <div class="control-row">
-              <label for="gridRows">Grid rows:</label>
-              <input id="gridRows" type="range" min="1" max="30" value="10" />
-              <span id="gridRowsValue">10</span>
-            </div>
-            <div class="control-row">
-              <label for="gridCols">Grid cols:</label>
-              <input id="gridCols" type="range" min="1" max="30" value="10" />
-              <span id="gridColsValue">10</span>
-            </div>
-            <div class="control-row">
-              <label for="minAlternations">Min alternations:</label>
-              <input id="minAlternations" type="range" min="0" max="200" value="20" />
-              <span id="minAlternationsValue">20</span>
-            </div>
-            <div class="control-row">
-              <label for="minPassingRows">Min passing rows %:</label>
-              <input id="minPassingRows" type="range" min="0" max="100" value="60" />
-              <span id="minPassingRowsValue">60%</span>
-            </div>
-            <div class="control-row">
-              <label for="runTolerance">Run-width tolerance:</label>
-              <input id="runTolerance" type="range" min="0.10" max="1.00" step="0.05" value="0.40" />
-              <span id="runToleranceValue">0.40</span>
             </div>
           </div>
         </div>
@@ -238,20 +213,10 @@
       const repeatToggleBtn = document.getElementById("repeatToggleBtn");
       const repeatControls = document.getElementById("repeatControls");
       const enableRowRepeat = document.getElementById("enableRowRepeat");
+      const repeatDepth = document.getElementById("repeatDepth");
+      const repeatDepthValue = document.getElementById("repeatDepthValue");
       const repeatAccuracy = document.getElementById("repeatAccuracy");
       const repeatAccuracyValue = document.getElementById("repeatAccuracyValue");
-      const binaryThreshold = document.getElementById("binaryThreshold");
-      const binaryThresholdValue = document.getElementById("binaryThresholdValue");
-      const gridRowsEl = document.getElementById("gridRows");
-      const gridRowsValue = document.getElementById("gridRowsValue");
-      const gridColsEl = document.getElementById("gridCols");
-      const gridColsValue = document.getElementById("gridColsValue");
-      const minAlternationsEl = document.getElementById("minAlternations");
-      const minAlternationsValue = document.getElementById("minAlternationsValue");
-      const minPassingRowsEl = document.getElementById("minPassingRows");
-      const minPassingRowsValue = document.getElementById("minPassingRowsValue");
-      const runToleranceEl = document.getElementById("runTolerance");
-      const runToleranceValue = document.getElementById("runToleranceValue");
       const statusEl = document.getElementById("status");
       const actualResolutionEl = document.getElementById("actualResolution");
 
@@ -259,8 +224,6 @@
       let rafId = 0;
       const processingCanvas = document.createElement("canvas");
       const processingCtx = processingCanvas.getContext("2d", { willReadFrequently: true });
-      const displayCanvas = document.createElement("canvas");
-      const displayCtx = displayCanvas.getContext("2d", { willReadFrequently: true });
 
       function setStatus(text) {
         statusEl.textContent = `Status: ${text}`;
@@ -280,47 +243,8 @@
       }
 
       function updateRepeatLabels() {
+        repeatDepthValue.textContent = repeatDepth.value;
         repeatAccuracyValue.textContent = `${repeatAccuracy.value}%`;
-        binaryThresholdValue.textContent = binaryThreshold.value;
-        gridRowsValue.textContent = gridRowsEl.value;
-        gridColsValue.textContent = gridColsEl.value;
-        minAlternationsValue.textContent = minAlternationsEl.value;
-        minPassingRowsValue.textContent = `${minPassingRowsEl.value}%`;
-        runToleranceValue.textContent = Number(runToleranceEl.value).toFixed(2);
-      }
-
-      function runConsistencyForRow(binaryMask, w, y, x0, x1, tolerance) {
-        let prev = binaryMask[y * w + x0];
-        let runLen = 1;
-        const runs = [];
-        for (let x = x0 + 1; x < x1; x += 1) {
-          const bit = binaryMask[y * w + x];
-          if (bit === prev) {
-            runLen += 1;
-            continue;
-          }
-          runs.push(runLen);
-          prev = bit;
-          runLen = 1;
-        }
-        runs.push(runLen);
-        if (runs.length < 6) return 0;
-
-        const sorted = runs.slice().sort((a, b) => a - b);
-        const basePoolCount = Math.max(3, Math.floor(sorted.length * 0.2));
-        let base = 0;
-        for (let i = 0; i < basePoolCount; i += 1) base += sorted[i];
-        base /= basePoolCount;
-        if (!base || !Number.isFinite(base)) return 0;
-
-        let consistentRuns = 0;
-        for (const len of runs) {
-          const q = len / base;
-          const nearest = Math.max(1, Math.round(q));
-          const err = Math.abs(q - nearest);
-          if (err <= tolerance) consistentRuns += 1;
-        }
-        return consistentRuns / runs.length;
       }
 
       function resizeOverlay() {
@@ -342,6 +266,10 @@
         const loop = () => {
           rafId = requestAnimationFrame(loop);
           if (!stream || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+          if (!enableRowRepeat.checked) {
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+            return;
+          }
 
           const w = video.videoWidth;
           const h = video.videoHeight;
@@ -353,105 +281,67 @@
           processingCtx.drawImage(video, 0, 0, w, h);
           const imageData = processingCtx.getImageData(0, 0, w, h);
           const data = imageData.data;
-          const threshold = Math.max(0, Math.min(255, Number(binaryThreshold.value) || 128));
-          const binaryMask = new Uint8Array(w * h);
 
-          for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-            const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-            const white = lum >= threshold ? 1 : 0;
-            const pixel = white ? 255 : 0;
-            data[i] = pixel;
-            data[i + 1] = pixel;
-            data[i + 2] = pixel;
-            data[i + 3] = 255;
-            binaryMask[p] = white;
-          }
-
+          const n = Math.max(1, Number(repeatDepth.value) || 1);
           const requiredAccuracy = Math.max(1, Math.min(100, Number(repeatAccuracy.value) || 85));
-          const shouldFindRepeats = enableRowRepeat.checked;
+          const maxPixelDelta = Math.max(2, Math.round(((100 - requiredAccuracy) / 100) * 64) + 4);
+          const highlighted = new Uint8Array(w * h);
+          const rowMask = new Uint8Array(w);
 
-          if (displayCanvas.width !== w || displayCanvas.height !== h) {
-            displayCanvas.width = w;
-            displayCanvas.height = h;
+          const maxY = h - n - 1;
+          for (let y = 0; y <= maxY; y += 1) {
+            rowMask.fill(0);
+            let matchingPixels = 0;
+
+            for (let x = 0; x < w; x += 1) {
+              let ok = true;
+              for (let step = 0; step < n; step += 1) {
+                const idxA = ((y + step) * w + x) * 4;
+                const idxB = ((y + step + 1) * w + x) * 4;
+                const dr = Math.abs(data[idxA] - data[idxB]);
+                const dg = Math.abs(data[idxA + 1] - data[idxB + 1]);
+                const db = Math.abs(data[idxA + 2] - data[idxB + 2]);
+                const delta = (dr + dg + db) / 3;
+                if (delta > maxPixelDelta) {
+                  ok = false;
+                  break;
+                }
+              }
+              if (!ok) continue;
+              rowMask[x] = 1;
+              matchingPixels += 1;
+            }
+
+            const rowAccuracy = (matchingPixels / w) * 100;
+            if (rowAccuracy < requiredAccuracy) continue;
+
+            for (let x = 0; x < w; x += 1) {
+              if (!rowMask[x]) continue;
+              for (let step = 0; step <= n; step += 1) {
+                highlighted[(y + step) * w + x] = 1;
+              }
+            }
           }
-          displayCtx.putImageData(imageData, 0, 0);
 
           const scaleX = overlay.width / w;
           const scaleY = overlay.height / h;
           overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-          overlayCtx.drawImage(displayCanvas, 0, 0, overlay.width, overlay.height);
+          overlayCtx.fillStyle = "rgba(0, 255, 0, 0.45)";
 
-          if (shouldFindRepeats) {
-            const gridRows = Math.max(1, Number(gridRowsEl.value) || 10);
-            const gridCols = Math.max(1, Number(gridColsEl.value) || 10);
-            const minAlternations = Math.max(0, Number(minAlternationsEl.value) || 0);
-            const minPassingRows = Math.max(0, Math.min(100, Number(minPassingRowsEl.value) || 0));
-            const runTolerance = Math.max(0.1, Math.min(1, Number(runToleranceEl.value) || 0.4));
-            const cellW = Math.floor(w / gridCols);
-            const cellH = Math.floor(h / gridRows);
-            overlayCtx.fillStyle = "rgba(0, 255, 0, 0.45)";
-
-            for (let gy = 0; gy < gridRows; gy += 1) {
-              const y0 = gy * cellH;
-              const y1 = gy === gridRows - 1 ? h : y0 + cellH;
-              const usableRows = y1 - y0 - 1;
-              if (usableRows <= 0) continue;
-
-              for (let gx = 0; gx < gridCols; gx += 1) {
-                const x0 = gx * cellW;
-                const x1 = gx === gridCols - 1 ? w : x0 + cellW;
-                const cellWidth = x1 - x0;
-                if (cellWidth <= 0) continue;
-
-                let totalComparisons = 0;
-                let matchingComparisons = 0;
-                let alternations = 0;
-                let rowPairs = 0;
-                let passingRows = 0;
-
-                for (let y = y0; y < y1 - 1; y += 1) {
-                  rowPairs += 1;
-                  let rowMatches = 0;
-                  for (let x = x0; x < x1; x += 1) {
-                    const a = y * w + x;
-                    const b = (y + 1) * w + x;
-                    totalComparisons += 1;
-                    if (binaryMask[a] === binaryMask[b]) {
-                      matchingComparisons += 1;
-                      rowMatches += 1;
-                    }
-                  }
-                  const rowRepeatPct = (rowMatches / cellWidth) * 100;
-                  const runConsistency = runConsistencyForRow(binaryMask, w, y, x0, x1, runTolerance);
-                  if (rowRepeatPct >= requiredAccuracy && runConsistency >= 0.65) {
-                    passingRows += 1;
-                  }
-                }
-
-                for (let y = y0; y < y1; y += 1) {
-                  const rowOffset = y * w;
-                  for (let x = x0 + 1; x < x1; x += 1) {
-                    if (binaryMask[rowOffset + x] !== binaryMask[rowOffset + x - 1]) {
-                      alternations += 1;
-                    }
-                  }
-                }
-
-                if (!totalComparisons) continue;
-                const cellAccuracy = (matchingComparisons / totalComparisons) * 100;
-                const passingRowsPct = rowPairs ? (passingRows / rowPairs) * 100 : 0;
-                if (
-                  cellAccuracy >= requiredAccuracy &&
-                  alternations >= minAlternations &&
-                  passingRowsPct >= minPassingRows
-                ) {
-                  overlayCtx.fillRect(
-                    x0 * scaleX,
-                    y0 * scaleY,
-                    (x1 - x0) * scaleX,
-                    (y1 - y0) * scaleY
-                  );
-                }
+          for (let y = 0; y < h; y += 1) {
+            const rowOffset = y * w;
+            let runStart = -1;
+            for (let x = 0; x <= w; x += 1) {
+              const isOn = x < w ? highlighted[rowOffset + x] === 1 : false;
+              if (isOn && runStart < 0) runStart = x;
+              if (!isOn && runStart >= 0) {
+                overlayCtx.fillRect(
+                  runStart * scaleX,
+                  y * scaleY,
+                  (x - runStart) * scaleX,
+                  Math.max(1, scaleY)
+                );
+                runStart = -1;
               }
             }
           }
@@ -547,13 +437,8 @@
         if (!stream) return;
         startProcessing();
       });
+      repeatDepth.addEventListener("input", updateRepeatLabels);
       repeatAccuracy.addEventListener("input", updateRepeatLabels);
-      binaryThreshold.addEventListener("input", updateRepeatLabels);
-      gridRowsEl.addEventListener("input", updateRepeatLabels);
-      gridColsEl.addEventListener("input", updateRepeatLabels);
-      minAlternationsEl.addEventListener("input", updateRepeatLabels);
-      minPassingRowsEl.addEventListener("input", updateRepeatLabels);
-      runToleranceEl.addEventListener("input", updateRepeatLabels);
       resolutionSelect.addEventListener("change", () => {
         if (!stream) return;
         startCamera();

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import argparse
+import cgi
 import json
 import os
 from pathlib import Path
+import re
 import ssl
+import subprocess
+import threading
 from urllib.parse import quote
 
 
@@ -247,10 +251,85 @@ class HtmlIndexHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if self.path == "/upload-image":
+            ctype = self.headers.get("Content-Type", "")
+            if not ctype.startswith("multipart/form-data"):
+                self.send_error(400)
+                return
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    "REQUEST_METHOD": "POST",
+                    "CONTENT_TYPE": ctype,
+                },
+            )
+            if "file" not in form:
+                self.send_error(400)
+                return
+            fileitem = form["file"]
+            if not fileitem.filename:
+                self.send_error(400)
+                return
+            filename = Path(fileitem.filename).name
+            if not filename:
+                self.send_error(400)
+                return
+            dest_dir = Path.cwd() / "current app pictures"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / filename
+            data = fileitem.file.read()
+            dest.write_bytes(data)
+            trigger_reconstruct(dest)
+            _last_post = f"upload-image {dest.as_posix()}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps({"status": "ok", "file": dest.as_posix()}).encode("utf-8")
+            )
+            return
+
         self.send_error(404)
 
 
 _last_post = "(none)"
+_reconstruct_lock = threading.Lock()
+_reconstruct_running = False
+
+
+def trigger_reconstruct(image_path: Path) -> None:
+    def worker() -> None:
+        global _reconstruct_running
+        with _reconstruct_lock:
+            if _reconstruct_running:
+                return
+            _reconstruct_running = True
+        try:
+            cmd = [
+                "python3",
+                "center_barcode_reconstruct.py",
+                "--image",
+                str(image_path),
+                "--out-dir",
+                "barcode_reconstruct_out",
+            ]
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=Path.cwd(),
+            )
+            if result.returncode != 0:
+                print("reconstruct failed")
+                print(result.stdout)
+                print(result.stderr)
+        finally:
+            with _reconstruct_lock:
+                _reconstruct_running = False
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def main() -> None:
@@ -288,6 +367,22 @@ def main() -> None:
 
     root = Path(args.root).resolve()
     os.chdir(root)
+
+    try:
+        result = subprocess.run(
+            ["ifconfig"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        match = re.search(r"\b10\.0\.0\.\d+\b", result.stdout)
+        if match:
+            config_path = root / "app_config.json"
+            config = {"uploadHost": match.group(0), "uploadPort": args.port}
+            config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            print(f"Updated app_config.json with uploadHost={config['uploadHost']}")
+    except Exception as exc:
+        print(f"app_config.json update failed: {exc!r}")
 
     server = ThreadingHTTPServer((args.host, args.port), HtmlIndexHandler)
     scheme = "http"
