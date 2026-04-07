@@ -53,7 +53,7 @@
       <label><input id="auto" type="checkbox" /> Auto rotate</label>
       <label>Speed: <span id="speedOut" class="mono">0</span>°/s</label>
       <input id="speed" type="range" min="0" max="45" step="1" value="0" />
-      <a class="qr-link" href="./edge_detection.html" title="Open camera view">
+      <a class="qr-link" href="./rotation_detection_edge.html" title="Open camera view">
         <img id="navQr" alt="QR code to open camera view" />
         <span>Click on this QR code to open camera view to detect angle of lines</span>
       </a>
@@ -79,7 +79,7 @@
     let last = performance.now();
 
     function setRealQr() {
-      const edgeUrl = new URL('./edge_detection.html', window.location.href);
+      const edgeUrl = new URL('./rotation_detection_edge.html', window.location.href);
       // GitHub Pages mode: use same host/path as current page.
       const targetUrl = edgeUrl.href;
       const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&qzone=4&data=${encodeURIComponent(targetUrl)}`;
@@ -177,7 +177,7 @@
 
     qrLink.addEventListener('click', (e) => {
       e.preventDefault();
-      const targetUrl = qrLink.dataset.targetUrl || new URL('./edge_detection.html', window.location.href).href;
+      const targetUrl = qrLink.dataset.targetUrl || new URL('./rotation_detection_edge.html', window.location.href).href;
       let msg = `Opening: ${targetUrl}`;
       try {
         const u = new URL(targetUrl);
