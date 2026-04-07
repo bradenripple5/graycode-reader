@@ -80,7 +80,6 @@
 
     function setRealQr() {
       const edgeUrl = new URL('./rotation_detection_edge.html', window.location.href);
-      // GitHub Pages mode: use same host/path as current page.
       const targetUrl = edgeUrl.href;
       const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&qzone=4&data=${encodeURIComponent(targetUrl)}`;
       navQr.src = qrSrc;

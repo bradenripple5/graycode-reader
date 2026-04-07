@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var angleText: TextView
     private lateinit var angleOutput: TextView
     private lateinit var menuBtn: Button
+    private lateinit var rotationDetectorBtn: Button
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
     private lateinit var centerOnlyToggle: CheckBox
@@ -144,6 +145,7 @@ class MainActivity : AppCompatActivity() {
         angleText = findViewById(R.id.angle_text)
         angleOutput = findViewById(R.id.angle_output)
         menuBtn = findViewById(R.id.menu_btn)
+        rotationDetectorBtn = findViewById(R.id.rotation_detector_btn)
         centerOnlyToggle = findViewById(R.id.center_only_toggle)
         startBtn = findViewById(R.id.start_btn)
         stopBtn = findViewById(R.id.stop_btn)
@@ -245,6 +247,9 @@ class MainActivity : AppCompatActivity() {
 
         menuBtn.setOnClickListener {
             startActivity(Intent(this, SavedCapturesActivity::class.java))
+        }
+        rotationDetectorBtn.setOnClickListener {
+            startActivity(Intent(this, RotationDetectionActivity::class.java))
         }
 
         updateLookupOutput()

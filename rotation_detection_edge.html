@@ -8,6 +8,9 @@
     body { font-family: sans-serif; margin: 20px; background: #f3f3f3; }
     .panel { max-width: 900px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .angle-big { font-size: 20px; font-weight: 700; }
+    .toggle-btn { width: 34px; height: 34px; font-size: 20px; line-height: 1; }
+    #advancedControls { display: none; }
     canvas { width: 100%; background: #111; border-radius: 6px; }
   </style>
 </head>
@@ -15,15 +18,17 @@
   <div class="panel">
     <h2>Rotation Detection via Edge Geometry</h2>
     <div class="row">
-      <button id="startBtn">Start</button>
-      <button id="stopBtn" disabled>Stop</button>
+      <button id="collapseBtn" class="toggle-btn" title="Show/Hide controls">+</button>
+      <span id="houghAvg" class="angle-big">Angle: -</span>
+    </div>
+    <div id="advancedControls" class="row">
       <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
       <label>hough avg window <span id="houghWindowVal">5</span> <input id="houghWindow" type="range" min="1" max="30" value="5" /></label>
       <label><input id="justEdges" type="checkbox" /> just edge detection</label>
       <label><input id="justHough" type="checkbox" checked /> just hough (make sure the vertical bars are the only thing in view)</label>
+      <span id="detectStatus">Status: idle</span>
       <span id="lineAngles">Angles: -</span>
-      <span id="lineAvg">Lines(5) Avg: -</span>
-      <span id="houghAvg">Hough Avg: -</span>
+      <span id="lineAvg">Lines(10) Gaussian Avg: -</span>
       <span id="barAvg">Bars(10) Avg: -</span>
     </div>
     <canvas id="cv" width="900" height="560"></canvas>
@@ -34,13 +39,14 @@
     const video = document.getElementById('video');
     const cv = document.getElementById('cv');
     const ctx = cv.getContext('2d');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
+    const collapseBtn = document.getElementById('collapseBtn');
+    const advancedControls = document.getElementById('advancedControls');
     const thrEl = document.getElementById('thr');
     const houghWindowEl = document.getElementById('houghWindow');
     const houghWindowValEl = document.getElementById('houghWindowVal');
     const justEdgesEl = document.getElementById('justEdges');
     const justHoughEl = document.getElementById('justHough');
+    const detectStatusEl = document.getElementById('detectStatus');
     const lineAnglesEl = document.getElementById('lineAngles');
     const lineAvgEl = document.getElementById('lineAvg');
     const houghAvgEl = document.getElementById('houghAvg');
@@ -52,7 +58,11 @@
     let stream = null, raf = null;
     const roi = { x: 0, y: 0, w: 0, h: 0 };
     let edgeSmooth = null, edgeSmoothW = 0, edgeSmoothH = 0;
-    const angleHistory = [[], [], [], [], []];
+    const LINE_COUNT = 10;
+    const LINE_HISTORY_LEN = 5;
+    const LINE_OUTLIER_DELTA = 20;
+    const LINE_GAUSS_SIGMA_DEG = 12;
+    const angleHistory = Array.from({ length: LINE_COUNT }, () => []);
     const houghHistory = [];
 
     function gaussianBlurGray(gray, w, h) {
@@ -137,6 +147,10 @@
       return v;
     }
 
+    function displayAngle(a) {
+      return normalize360(a + 90);
+    }
+
     function angleDelta360(a, b) {
       let d = Math.abs(a - b) % 360;
       if (d > 180) d = 360 - d;
@@ -154,7 +168,24 @@
       return normalize360((Math.atan2(s, c) * 180) / Math.PI);
     }
 
-    function pushAngleAverage(slot, angleDeg, maxN = 5, maxDelta = 20) {
+    function gaussianWeightedAverageAngles360(angles, lengths = null, sigmaDeg = 12) {
+      if (!angles.length) return null;
+      const seed = averageAngles360(angles);
+      const sigma = Math.max(1, sigmaDeg);
+      let s = 0, c = 0;
+      for (let i = 0; i < angles.length; i++) {
+        const d = angleDelta360(angles[i], seed);
+        const g = Math.exp(-0.5 * (d / sigma) * (d / sigma));
+        const lw = lengths && lengths[i] ? lengths[i] : 1;
+        const w = g * lw;
+        const r = (angles[i] * Math.PI) / 180;
+        s += Math.sin(r) * w;
+        c += Math.cos(r) * w;
+      }
+      return normalize360((Math.atan2(s, c) * 180) / Math.PI);
+    }
+
+    function pushAngleAverage(slot, angleDeg, maxN = LINE_HISTORY_LEN, maxDelta = LINE_OUTLIER_DELTA) {
       const h = angleHistory[slot];
       if (h.length) {
         const preAvg = averageAngles360(h);
@@ -495,181 +526,212 @@
         houghHistory.length = 0;
         return null;
       }
+      function gaussianPdf(x, mu, sigma) {
+        const s = Math.max(1e-6, sigma);
+        const z = (x - mu) / s;
+        return (1 / (s * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * z * z);
+      }
       const win = Math.max(1, parseInt(houghWindowEl.value, 10) || 5);
       houghWindowValEl.textContent = String(win);
       houghHistory.push(frameAngle);
       if (houghHistory.length > win) houghHistory.splice(0, houghHistory.length - win);
-      return averageAngles360(houghHistory);
+      const n = houghHistory.length;
+      const mu = 0; // newest sample age
+      const sigma = Math.max(0.8, win / 3);
+      let s = 0, c = 0;
+      for (let i = 0; i < n; i++) {
+        const age = (n - 1) - i; // newest sample has age 0
+        const w = gaussianPdf(age, mu, sigma);
+        const r = (houghHistory[i] * Math.PI) / 180;
+        s += Math.sin(r) * w;
+        c += Math.cos(r) * w;
+      }
+      return normalize360((Math.atan2(s, c) * 180) / Math.PI);
     }
 
     function process() {
-      if (!video.videoWidth) { raf = requestAnimationFrame(process); return; }
-      cv.width = 900;
-      cv.height = Math.round(900 * video.videoHeight / video.videoWidth);
-      roi.w = cv.width * 0.5;
-      roi.h = cv.height * 0.5;
-      roi.x = (cv.width - roi.w) / 2;
-      roi.y = (cv.height - roi.h) / 2;
-      clampRoi();
-      work.width = cv.width;
-      work.height = cv.height;
-      wctx.drawImage(video, 0, 0, work.width, work.height);
-      const frame = wctx.getImageData(0, 0, work.width, work.height);
-      const d = frame.data;
-      const rx0 = roi.x | 0, ry0 = roi.y | 0, rx1 = (roi.x + roi.w) | 0, ry1 = (roi.y + roi.h) | 0;
-      const rw = Math.max(2, rx1 - rx0);
-      const rh = Math.max(2, ry1 - ry0);
-      const gray = new Uint8Array(rw * rh);
-      for (let y = 0; y < rh; y++) {
-        const sy = ry0 + y;
-        for (let x = 0; x < rw; x++) {
-          const sx = rx0 + x;
-          const p = (sy * work.width + sx) * 4;
-          gray[y * rw + x] = (d[p] * 30 + d[p + 1] * 59 + d[p + 2] * 11) / 100;
+      try {
+        if (!video.videoWidth) {
+          detectStatusEl.textContent = 'Status: waiting for camera frame';
+          return;
         }
-      }
-      const blurred = gaussianBlurGray(gray, rw, rh);
-      const edgeRgba = sobelEdges(blurred, rw, rh, parseInt(thrEl.value, 10));
-      temporalSmoothEdges(edgeRgba, rw, rh);
-      const redCentroid = detectRedCentroid(d, work.width, rx0, ry0, rw, rh);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, cv.width, cv.height);
-      ctx.putImageData(new ImageData(edgeRgba, rw, rh), rx0, ry0);
-      if (justEdgesEl.checked) {
-        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
-        houghHistory.length = 0;
-        lineAnglesEl.textContent = 'Angles: -';
-        lineAvgEl.textContent = 'Lines(5) Avg: -';
-        houghAvgEl.textContent = 'Hough Avg: -';
-        barAvgEl.textContent = 'Bars(10) Avg: -';
-        drawRoiOverlay();
-        raf = requestAnimationFrame(process);
-        return;
-      }
-      if (justHoughEl.checked) {
-        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
-        lineAnglesEl.textContent = 'Angles: -';
-        lineAvgEl.textContent = 'Lines(5) Avg: -';
-        barAvgEl.textContent = 'Bars(10) Avg: -';
-        const houghRaw = houghAverageAngle(edgeRgba, rw, rh, 5, redCentroid);
-        const houghAvg = smoothHough(houghRaw);
-        houghAvgEl.textContent = houghAvg === null ? 'Hough Avg: -' : `Hough Avg: ${houghAvg.toFixed(1)}°`;
-        drawRoiOverlay();
-        raf = requestAnimationFrame(process);
-        return;
-      }
-      const lines = extractLongestLines(edgeRgba, rw, rh, 5);
-      if (lines.length) {
-        const colors = ['#ff5555', '#55ff55', '#5599ff', '#ffd84d', '#ff7dff'];
-        const angleTexts = [];
-        const smoothAngles = [];
-        ctx.save();
-        ctx.lineWidth = 2.2;
-        for (let i = 0; i < lines.length; i++) {
-          const ln = lines[i];
-          let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2;
-          // Orient line direction toward red end-caps when present.
-          if (redCentroid) {
-            const mx = (x1 + x2) * 0.5;
-            const my = (y1 + y2) * 0.5;
-            const vx = x2 - x1;
-            const vy = y2 - y1;
-            const toRedX = redCentroid.x - mx;
-            const toRedY = redCentroid.y - my;
-            if (vx * toRedX + vy * toRedY < 0) {
-              const tx = x1, ty = y1;
-              x1 = x2; y1 = y2;
-              x2 = tx; y2 = ty;
-            }
+        cv.width = 900;
+        cv.height = Math.round(900 * video.videoHeight / video.videoWidth);
+        roi.w = cv.width * 0.5;
+        roi.h = cv.height * 0.5;
+        roi.x = (cv.width - roi.w) / 2;
+        roi.y = (cv.height - roi.h) / 2;
+        clampRoi();
+        work.width = cv.width;
+        work.height = cv.height;
+        wctx.drawImage(video, 0, 0, work.width, work.height);
+        const frame = wctx.getImageData(0, 0, work.width, work.height);
+        const d = frame.data;
+        const rx0 = roi.x | 0, ry0 = roi.y | 0, rx1 = (roi.x + roi.w) | 0, ry1 = (roi.y + roi.h) | 0;
+        const rw = Math.max(2, rx1 - rx0);
+        const rh = Math.max(2, ry1 - ry0);
+        const gray = new Uint8Array(rw * rh);
+        for (let y = 0; y < rh; y++) {
+          const sy = ry0 + y;
+          for (let x = 0; x < rw; x++) {
+            const sx = rx0 + x;
+            const p = (sy * work.width + sx) * 4;
+            gray[y * rw + x] = (d[p] * 30 + d[p + 1] * 59 + d[p + 2] * 11) / 100;
           }
-          const ang = normalize360((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI);
-          const avgAng = pushAngleAverage(i, ang, 5, 20);
-          smoothAngles.push(avgAng);
-          angleTexts.push(`${i + 1}:${avgAng.toFixed(1)}°`);
-          ctx.strokeStyle = colors[i % colors.length];
-          ctx.beginPath();
-          ctx.moveTo(rx0 + x1, ry0 + y1);
-          ctx.lineTo(rx0 + x2, ry0 + y2);
-          ctx.stroke();
-          // Draw red box at oriented "top" end.
-          ctx.fillStyle = '#ff2a2a';
-          ctx.fillRect(rx0 + x2 - 3, ry0 + y2 - 3, 6, 6);
         }
-        for (let i = lines.length; i < 5; i++) angleHistory[i].length = 0;
-        ctx.restore();
-        lineAnglesEl.textContent = `Angles: ${angleTexts.join('  ')}`;
-        const seed = averageAngles360(smoothAngles);
-        const filtered = smoothAngles.filter((a) => angleDelta360(a, seed) <= 20);
-        const lineAvg = averageAngles360(filtered.length ? filtered : smoothAngles);
-        lineAvgEl.textContent = `Lines(5) Avg: ${lineAvg.toFixed(1)}°`;
-      } else {
-        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
-        lineAnglesEl.textContent = 'Angles: -';
-        lineAvgEl.textContent = 'Lines(5) Avg: -';
-      }
-      if (redCentroid) {
-        ctx.fillStyle = '#ff2a2a';
-        ctx.fillRect(rx0 + redCentroid.x - 4, ry0 + redCentroid.y - 4, 8, 8);
-      }
+        const blurred = gaussianBlurGray(gray, rw, rh);
+        const edgeRgba = sobelEdges(blurred, rw, rh, parseInt(thrEl.value, 10));
+        temporalSmoothEdges(edgeRgba, rw, rh);
+        let edgeCount = 0;
+        for (let i = 0; i < edgeRgba.length; i += 4) if (edgeRgba[i] > 0) edgeCount++;
+        detectStatusEl.textContent = edgeCount > 0 ? `Status: edges detected (${edgeCount})` : 'Status: no edges detected';
+        const redCentroid = detectRedCentroid(d, work.width, rx0, ry0, rw, rh);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.putImageData(new ImageData(edgeRgba, rw, rh), rx0, ry0);
+        if (justEdgesEl.checked) {
+          for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
+          houghHistory.length = 0;
+          lineAnglesEl.textContent = 'Angles: -';
+          lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
+          houghAvgEl.textContent = 'Angle: -';
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          drawRoiOverlay();
+          return;
+        }
+        const houghRawFrame = houghAverageAngle(edgeRgba, rw, rh, 5, redCentroid);
 
-      const bars = extractVerticalBars(edgeRgba, rw, rh, 10);
-      if (bars.length) {
-        const rawAngles = bars.map((b) => b.ang);
-        const seed = averageAngles180(rawAngles);
-        const filtered = rawAngles.filter((a) => angleDelta180(a, seed) <= 20);
-        const avg = averageAngles180(filtered.length ? filtered : rawAngles);
-        ctx.save();
-        ctx.lineWidth = 1.8;
-        ctx.strokeStyle = 'rgba(255, 120, 40, 0.95)';
-        for (let i = 0; i < bars.length; i++) {
-          const b = bars[i];
-          ctx.beginPath();
-          ctx.moveTo(rx0 + b.x1, ry0 + b.y1);
-          ctx.lineTo(rx0 + b.x2, ry0 + b.y2);
-          ctx.stroke();
+        if (justHoughEl.checked) {
+          for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
+          lineAnglesEl.textContent = 'Angles: -';
+          lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          const houghAvg = smoothHough(houghRawFrame);
+          houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+          drawRoiOverlay();
+          return;
         }
-        ctx.restore();
-        barAvgEl.textContent = `Bars(${bars.length}) Avg: ${avg.toFixed(1)}°`;
-      } else {
-        barAvgEl.textContent = 'Bars(10) Avg: -';
+        const lines = extractLongestLines(edgeRgba, rw, rh, LINE_COUNT);
+        let usedHoughFallbackForLines = false;
+        if (lines.length) {
+          const colors = ['#ff5555', '#55ff55', '#5599ff', '#ffd84d', '#ff7dff'];
+          const angleTexts = [];
+          const smoothAngles = [];
+          const lineLens = [];
+          ctx.save();
+          ctx.lineWidth = 2.2;
+          for (let i = 0; i < lines.length; i++) {
+            const ln = lines[i];
+            let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2;
+            // Orient line direction toward red end-caps when present.
+            if (redCentroid) {
+              const mx = (x1 + x2) * 0.5;
+              const my = (y1 + y2) * 0.5;
+              const vx = x2 - x1;
+              const vy = y2 - y1;
+              const toRedX = redCentroid.x - mx;
+              const toRedY = redCentroid.y - my;
+              if (vx * toRedX + vy * toRedY < 0) {
+                const tx = x1, ty = y1;
+                x1 = x2; y1 = y2;
+                x2 = tx; y2 = ty;
+              }
+            }
+            const ang = normalize360((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI);
+            const avgAng = pushAngleAverage(i, ang, LINE_HISTORY_LEN, LINE_OUTLIER_DELTA);
+            smoothAngles.push(avgAng);
+            lineLens.push(ln.len);
+            angleTexts.push(`${i + 1}:${displayAngle(avgAng).toFixed(1)}°`);
+            ctx.strokeStyle = colors[i % colors.length];
+            ctx.beginPath();
+            ctx.moveTo(rx0 + x1, ry0 + y1);
+            ctx.lineTo(rx0 + x2, ry0 + y2);
+            ctx.stroke();
+            // Draw red box at oriented "top" end.
+            ctx.fillStyle = '#ff2a2a';
+            ctx.fillRect(rx0 + x2 - 3, ry0 + y2 - 3, 6, 6);
+          }
+          for (let i = lines.length; i < LINE_COUNT; i++) angleHistory[i].length = 0;
+          ctx.restore();
+          const preview = angleTexts.slice(0, 10).join('  ');
+          lineAnglesEl.textContent = angleTexts.length > 10 ? `Angles: ${preview} ...` : `Angles: ${preview}`;
+          const lineAvg = gaussianWeightedAverageAngles360(smoothAngles, lineLens, LINE_GAUSS_SIGMA_DEG);
+          lineAvgEl.textContent = `Lines(${lines.length}) Gaussian Avg: ${displayAngle(lineAvg).toFixed(1)}°`;
+        } else {
+          for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
+          lineAnglesEl.textContent = 'Angles: -';
+          usedHoughFallbackForLines = true;
+        }
+        if (redCentroid) {
+          ctx.fillStyle = '#ff2a2a';
+          ctx.fillRect(rx0 + redCentroid.x - 4, ry0 + redCentroid.y - 4, 8, 8);
+        }
+
+        const bars = extractVerticalBars(edgeRgba, rw, rh, 10);
+        if (bars.length) {
+          const rawAngles = bars.map((b) => b.ang);
+          const seed = averageAngles180(rawAngles);
+          const filtered = rawAngles.filter((a) => angleDelta180(a, seed) <= 20);
+          const avg = averageAngles180(filtered.length ? filtered : rawAngles);
+          ctx.save();
+          ctx.lineWidth = 1.8;
+          ctx.strokeStyle = 'rgba(255, 120, 40, 0.95)';
+          for (let i = 0; i < bars.length; i++) {
+            const b = bars[i];
+            ctx.beginPath();
+            ctx.moveTo(rx0 + b.x1, ry0 + b.y1);
+            ctx.lineTo(rx0 + b.x2, ry0 + b.y2);
+            ctx.stroke();
+          }
+          ctx.restore();
+          barAvgEl.textContent = `Bars(${bars.length}) Avg: ${avg.toFixed(1)}°`;
+        } else {
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+        }
+        const houghAvg = smoothHough(houghRawFrame);
+        houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+        if (usedHoughFallbackForLines) {
+          lineAvgEl.textContent = houghAvg === null
+            ? `Lines(${LINE_COUNT}) Gaussian Avg: -`
+            : `Lines(${lines.length}) Gaussian Avg (Hough fallback): ${displayAngle(houghAvg).toFixed(1)}°`;
+        }
+        drawRoiOverlay();
+      } catch (e) {
+        // Keep the loop alive across transient camera/canvas failures on mobile.
+      } finally {
+        if (video.srcObject) raf = requestAnimationFrame(process);
       }
-      const houghAvg = smoothHough(houghAverageAngle(edgeRgba, rw, rh, 5, redCentroid));
-      houghAvgEl.textContent = houghAvg === null ? 'Hough Avg: -' : `Hough Avg: ${houghAvg.toFixed(1)}°`;
-      drawRoiOverlay();
-      raf = requestAnimationFrame(process);
     }
 
-    startBtn.onclick = async () => {
+    async function startCamera() {
+      if (stream) return;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
         video.srcObject = stream;
         await video.play();
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
         cancelAnimationFrame(raf);
         process();
       } catch (e) {
         alert('Camera error: ' + e.message);
       }
-    };
+    }
 
-    stopBtn.onclick = () => {
+    function stopCamera() {
       if (stream) stream.getTracks().forEach(t => t.stop());
       stream = null;
       video.srcObject = null;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
+      detectStatusEl.textContent = 'Status: stopped';
       cancelAnimationFrame(raf);
       edgeSmooth = null;
-      for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
+      for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
       houghHistory.length = 0;
       lineAnglesEl.textContent = 'Angles: -';
-      lineAvgEl.textContent = 'Lines(5) Avg: -';
-      houghAvgEl.textContent = 'Hough Avg: -';
+      lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
+      houghAvgEl.textContent = 'Angle: -';
       barAvgEl.textContent = 'Bars(10) Avg: -';
       ctx.fillStyle = '#111';
       ctx.fillRect(0, 0, cv.width, cv.height);
-    };
+    }
 
     thrEl.oninput = () => {
       try { localStorage.setItem(THRESHOLD_KEY, thrEl.value); } catch (e) {}
@@ -704,6 +766,16 @@
       if (saved !== null && saved !== '') thrEl.value = saved;
     } catch (e) {}
     houghWindowValEl.textContent = houghWindowEl.value;
+    collapseBtn.onclick = () => {
+      const expanded = advancedControls.style.display !== 'none';
+      advancedControls.style.display = expanded ? 'none' : 'flex';
+      collapseBtn.textContent = expanded ? '+' : '-';
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stopCamera();
+      else startCamera();
+    });
+    startCamera();
   </script>
 </body>
 </html>

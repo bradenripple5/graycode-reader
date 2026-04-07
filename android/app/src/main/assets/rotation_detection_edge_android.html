@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rotation Detection (Android)</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #101010; color: #fff; }
+    .panel { padding: 10px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+    canvas { width: 100%; background: #000; border-radius: 6px; }
+    button, input { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="row">
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
+      <label>Hough Window <span id="winOut">5</span> <input id="win" type="range" min="1" max="20" value="5" /></label>
+      <span id="status">Status: idle</span>
+    </div>
+    <div class="row">
+      <span id="hough">Hough Avg: -</span>
+    </div>
+    <canvas id="cv" width="720" height="480"></canvas>
+  </div>
+  <video id="video" playsinline style="display:none"></video>
+  <script>
+    const video = document.getElementById('video');
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const thrEl = document.getElementById('thr');
+    const winEl = document.getElementById('win');
+    const winOut = document.getElementById('winOut');
+    const statusEl = document.getElementById('status');
+    const houghEl = document.getElementById('hough');
+    const work = document.createElement('canvas');
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+    let stream = null, raf = null;
+    const houghHistory = [];
+
+    function normalize360(a){ let v=a%360; if(v<0)v+=360; return v; }
+    function angleDelta360(a,b){ let d=Math.abs(a-b)%360; if(d>180)d=360-d; return d; }
+    function averageAngles360(angles){
+      if(!angles.length) return null;
+      let s=0,c=0; for(let i=0;i<angles.length;i++){ const r=angles[i]*Math.PI/180; s+=Math.sin(r); c+=Math.cos(r); }
+      return normalize360(Math.atan2(s,c)*180/Math.PI);
+    }
+    function smoothHough(a){
+      if(a==null){ houghHistory.length=0; return null; }
+      const w=Math.max(1,parseInt(winEl.value,10)||5); winOut.textContent=String(w);
+      houghHistory.push(a); if(houghHistory.length>w) houghHistory.splice(0,houghHistory.length-w);
+      return averageAngles360(houghHistory);
+    }
+    function gaussianBlurGray(gray,w,h){
+      const tmp=new Float32Array(w*h), out=new Uint8Array(w*h);
+      for(let y=0;y<h;y++){ const row=y*w; for(let x=0;x<w;x++){ const xm1=x>0?x-1:x, xp1=x+1<w?x+1:x; tmp[row+x]=(gray[row+xm1]+2*gray[row+x]+gray[row+xp1])*0.25; } }
+      for(let y=0;y<h;y++){ const ym1=y>0?y-1:y, yp1=y+1<h?y+1:y; for(let x=0;x<w;x++){ out[y*w+x]=(tmp[ym1*w+x]+2*tmp[y*w+x]+tmp[yp1*w+x])*0.25; } }
+      return out;
+    }
+    function sobelEdges(gray,w,h,thr){
+      const out=new Uint8ClampedArray(w*h*4);
+      for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++){
+        const i=y*w+x;
+        const gx=-gray[i-w-1]-2*gray[i-1]-gray[i+w-1]+gray[i-w+1]+2*gray[i+1]+gray[i+w+1];
+        const gy=-gray[i-w-1]-2*gray[i-w]-gray[i-w+1]+gray[i+w-1]+2*gray[i+w]+gray[i+w+1];
+        const v=(Math.abs(gx)+Math.abs(gy)>thr*8)?255:0, p=i*4;
+        out[p]=v; out[p+1]=v; out[p+2]=v; out[p+3]=255;
+      }
+      return out;
+    }
+    function houghAngle(edgeRgba,w,h){
+      const pts=[]; for(let y=1;y<h-1;y+=2) for(let x=1;x<w-1;x+=2){ if(edgeRgba[(y*w+x)*4]>0) pts.push({x,y}); }
+      if(pts.length<60) return null;
+      while(pts.length>2600) pts.splice((Math.random()*pts.length)|0,1);
+      const thetaBins=180, rhoMax=Math.ceil(Math.hypot(w,h)), rhoBins=rhoMax*2+1;
+      const acc=new Uint16Array(thetaBins*rhoBins), cosT=new Float32Array(thetaBins), sinT=new Float32Array(thetaBins);
+      for(let t=0;t<thetaBins;t++){ const r=t*Math.PI/180; cosT[t]=Math.cos(r); sinT[t]=Math.sin(r); }
+      for(let i=0;i<pts.length;i++){
+        const x=pts[i].x, y=pts[i].y;
+        for(let t=0;t<thetaBins;t++){ const rho=Math.round(x*cosT[t]+y*sinT[t])+rhoMax; acc[t*rhoBins+rho]+=1; }
+      }
+      let bestT=-1,bestV=0;
+      for(let t=0;t<thetaBins;t++) for(let r=1;r<rhoBins-1;r++){
+        const v=acc[t*rhoBins+r]; if(v<20) continue;
+        if(v>=acc[t*rhoBins+r-1]&&v>=acc[t*rhoBins+r+1]&&v>bestV){ bestV=v; bestT=t; }
+      }
+      if(bestT<0) return null;
+      return ((bestT+90)%180+180)%180;
+    }
+    function process(){
+      try{
+        if(!video.videoWidth){ statusEl.textContent='Status: waiting for camera frame'; return; }
+        cv.width=720; cv.height=Math.round(720*video.videoHeight/video.videoWidth);
+        work.width=cv.width; work.height=cv.height;
+        const roiW=(cv.width*0.5)|0, roiH=(cv.height*0.5)|0, rx=((cv.width-roiW)/2)|0, ry=((cv.height-roiH)/2)|0;
+        wctx.drawImage(video,0,0,work.width,work.height);
+        const frame=wctx.getImageData(0,0,work.width,work.height), d=frame.data;
+        const gray=new Uint8Array(roiW*roiH);
+        for(let y=0;y<roiH;y++) for(let x=0;x<roiW;x++){
+          const p=((ry+y)*work.width+(rx+x))*4; gray[y*roiW+x]=(d[p]*30+d[p+1]*59+d[p+2]*11)/100;
+        }
+        const edge=sobelEdges(gaussianBlurGray(gray,roiW,roiH),roiW,roiH,parseInt(thrEl.value,10));
+        let edgeCount=0; for(let i=0;i<edge.length;i+=4) if(edge[i]>0) edgeCount++;
+        statusEl.textContent=edgeCount>0?`Status: edges detected (${edgeCount})`:'Status: no edges detected';
+        ctx.fillStyle='#000'; ctx.fillRect(0,0,cv.width,cv.height);
+        ctx.putImageData(new ImageData(edge,roiW,roiH),rx,ry);
+        ctx.strokeStyle='rgba(0,255,180,.95)'; ctx.lineWidth=2; ctx.strokeRect(rx,ry,roiW,roiH);
+        const a=houghAngle(edge,roiW,roiH), avg=smoothHough(a);
+        houghEl.textContent=avg==null?'Hough Avg: -':`Hough Avg: ${(avg+90)%360|0}°`;
+      }catch(_e){}
+      finally{ if(video.srcObject) raf=requestAnimationFrame(process); }
+    }
+    startBtn.onclick=async()=>{
+      try{
+        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+        video.srcObject=stream; await video.play();
+        startBtn.disabled=true; stopBtn.disabled=false;
+        cancelAnimationFrame(raf); process();
+      }catch(e){ statusEl.textContent='Status: camera error '+e.message; }
+    };
+    stopBtn.onclick=()=>{
+      if(stream) stream.getTracks().forEach(t=>t.stop());
+      stream=null; video.srcObject=null; cancelAnimationFrame(raf);
+      startBtn.disabled=false; stopBtn.disabled=true; statusEl.textContent='Status: stopped'; houghEl.textContent='Hough Avg: -';
+      ctx.fillStyle='#111'; ctx.fillRect(0,0,cv.width,cv.height);
+    };
+    winOut.textContent=winEl.value;
+    winEl.oninput=()=>{ winOut.textContent=winEl.value; };
+  </script>
+</body>
+</html>
