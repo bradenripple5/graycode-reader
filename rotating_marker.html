@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rotating Marker</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #f3f3f3; }
+    .panel { max-width: 760px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
+    .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    canvas { width: 100%; background: #ddd; border-radius: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .qr-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 2px solid #2c6;
+      border-radius: 8px;
+      background: #eaffea;
+      color: #083;
+      font-weight: 700;
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+    #navQr {
+      width: 140px;
+      height: 140px;
+      border: 1px solid #222;
+      background: #fff;
+      object-fit: contain;
+    }
+    .notice {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #fffbe6;
+      border: 1px solid #e6d78a;
+      color: #5a4b00;
+      font-size: 12px;
+      display: none;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2>Rotating Vertical Bars (Red Top Caps)</h2>
+    <div class="row">
+      <label>Rotation: <span id="angleOut" class="mono">0.0°</span></label>
+      <input id="angle" type="range" min="0" max="360" step="0.1" value="0" style="flex:1; min-width:260px;" />
+      <label><input id="auto" type="checkbox" /> Auto rotate</label>
+      <label>Speed: <span id="speedOut" class="mono">0</span>°/s</label>
+      <input id="speed" type="range" min="0" max="45" step="1" value="0" />
+      <a class="qr-link" href="./edge_detection.html" title="Open camera view">
+        <img id="navQr" alt="QR code to open camera view" />
+        <span>Click on this QR code to open camera view to detect angle of lines</span>
+      </a>
+    </div>
+    <div id="qrNotice" class="notice"></div>
+    <canvas id="cv" width="720" height="480"></canvas>
+  </div>
+
+  <script>
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    const angleEl = document.getElementById('angle');
+    const angleOut = document.getElementById('angleOut');
+    const autoEl = document.getElementById('auto');
+    const speedEl = document.getElementById('speed');
+    const speedOut = document.getElementById('speedOut');
+    const navQr = document.getElementById('navQr');
+    const qrLink = document.querySelector('.qr-link');
+    const qrNotice = document.getElementById('qrNotice');
+    const SPEED_KEY = 'rotating_marker_speed_v1';
+
+    let angle = 0;
+    let last = performance.now();
+
+    function setRealQr() {
+      const edgeUrl = new URL('./edge_detection.html', window.location.href);
+      // GitHub Pages mode: use same host/path as current page.
+      const targetUrl = edgeUrl.href;
+      const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&qzone=4&data=${encodeURIComponent(targetUrl)}`;
+      navQr.src = qrSrc;
+      navQr.title = targetUrl;
+      qrLink.dataset.targetUrl = targetUrl;
+      qrLink.href = targetUrl;
+    }
+
+    function isLikelyLocalHost(host) {
+      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.endsWith('.local');
+    }
+
+    function isPrivateIp(host) {
+      const m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+      if (!m) return false;
+      const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+      return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    }
+
+    function showQrNotice(msg) {
+      qrNotice.textContent = msg;
+      qrNotice.style.display = 'block';
+      clearTimeout(showQrNotice._t);
+      showQrNotice._t = setTimeout(() => { qrNotice.style.display = 'none'; }, 7000);
+    }
+
+    function drawMarker(deg) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+
+      const cx = cv.width / 2;
+      const cy = cv.height / 2;
+      const s = 220;
+      const bars = 10;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate((deg * Math.PI) / 180);
+
+      // 10 vertical white bars on black background.
+      const margin = 16;
+      const innerW = s - margin * 2;
+      const innerH = s - margin * 2;
+      const barW = innerW / bars;
+      for (let i = 0; i < bars; i++) {
+        ctx.fillStyle = '#fff';
+        const x = -s / 2 + margin + i * barW + barW * 0.12;
+        ctx.fillRect(x, -s / 2 + margin, barW * 0.76, innerH);
+
+        // Red cap marks the same end of every bar ("top" reference).
+        ctx.fillStyle = '#ff2a2a';
+        ctx.fillRect(x, -s / 2 + margin, barW * 0.76, Math.max(6, innerH * 0.12));
+      }
+
+      ctx.restore();
+
+      // Crosshair
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(cx - 20, cy); ctx.lineTo(cx + 20, cy);
+      ctx.moveTo(cx, cy - 20); ctx.lineTo(cx, cy + 20);
+      ctx.stroke();
+    }
+
+    function tick(ts) {
+      const dt = Math.min(0.05, (ts - last) / 1000);
+      last = ts;
+      const speed = parseFloat(speedEl.value) || 0;
+      speedOut.textContent = String(Math.round(speed));
+      if (autoEl.checked) {
+        angle = (angle + dt * speed) % 360;
+        angleEl.value = angle.toFixed(1);
+      } else {
+        angle = parseFloat(angleEl.value) || 0;
+      }
+      angleOut.textContent = `${angle.toFixed(1)}°`;
+      drawMarker(angle);
+      requestAnimationFrame(tick);
+    }
+
+    angleEl.addEventListener('input', () => {
+      if (!autoEl.checked) angle = parseFloat(angleEl.value) || 0;
+    });
+
+    speedEl.addEventListener('input', () => {
+      try { localStorage.setItem(SPEED_KEY, speedEl.value); } catch (e) {}
+    });
+
+    try {
+      const saved = localStorage.getItem(SPEED_KEY);
+      if (saved !== null && saved !== '') speedEl.value = saved;
+    } catch (e) {}
+
+    qrLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetUrl = qrLink.dataset.targetUrl || new URL('./edge_detection.html', window.location.href).href;
+      let msg = `Opening: ${targetUrl}`;
+      try {
+        const u = new URL(targetUrl);
+        if (isLikelyLocalHost(u.hostname) || isPrivateIp(u.hostname)) {
+          msg += ' | Note: phone camera may not open this unless that host is reachable from your phone.';
+        }
+      } catch (err) {}
+      showQrNotice(msg);
+      setTimeout(() => { window.location.href = targetUrl; }, 900);
+    });
+
+    setRealQr();
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

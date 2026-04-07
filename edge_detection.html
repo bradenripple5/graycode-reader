@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rotation Detection via Edge Geometry</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #f3f3f3; }
+    .panel { max-width: 900px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    canvas { width: 100%; background: #111; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h2>Rotation Detection via Edge Geometry</h2>
+    <div class="row">
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
+      <label>hough avg window <span id="houghWindowVal">5</span> <input id="houghWindow" type="range" min="1" max="30" value="5" /></label>
+      <label><input id="justEdges" type="checkbox" /> just edge detection</label>
+      <label><input id="justHough" type="checkbox" checked /> just hough (make sure the vertical bars are the only thing in view)</label>
+      <span id="lineAngles">Angles: -</span>
+      <span id="lineAvg">Lines(5) Avg: -</span>
+      <span id="houghAvg">Hough Avg: -</span>
+      <span id="barAvg">Bars(10) Avg: -</span>
+    </div>
+    <canvas id="cv" width="900" height="560"></canvas>
+  </div>
+  <video id="video" playsinline style="display:none"></video>
+
+  <script>
+    const video = document.getElementById('video');
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const thrEl = document.getElementById('thr');
+    const houghWindowEl = document.getElementById('houghWindow');
+    const houghWindowValEl = document.getElementById('houghWindowVal');
+    const justEdgesEl = document.getElementById('justEdges');
+    const justHoughEl = document.getElementById('justHough');
+    const lineAnglesEl = document.getElementById('lineAngles');
+    const lineAvgEl = document.getElementById('lineAvg');
+    const houghAvgEl = document.getElementById('houghAvg');
+    const barAvgEl = document.getElementById('barAvg');
+    const THRESHOLD_KEY = 'edge_detection_threshold_v1';
+
+    const work = document.createElement('canvas');
+    const wctx = work.getContext('2d', { willReadFrequently: true });
+    let stream = null, raf = null;
+    const roi = { x: 0, y: 0, w: 0, h: 0 };
+    let edgeSmooth = null, edgeSmoothW = 0, edgeSmoothH = 0;
+    const angleHistory = [[], [], [], [], []];
+    const houghHistory = [];
+
+    function gaussianBlurGray(gray, w, h) {
+      const tmp = new Float32Array(w * h);
+      const out = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+          const xm1 = x > 0 ? x - 1 : x;
+          const xp1 = x + 1 < w ? x + 1 : x;
+          tmp[row + x] = (gray[row + xm1] + 2 * gray[row + x] + gray[row + xp1]) * 0.25;
+        }
+      }
+      for (let y = 0; y < h; y++) {
+        const ym1 = y > 0 ? y - 1 : y;
+        const yp1 = y + 1 < h ? y + 1 : y;
+        for (let x = 0; x < w; x++) {
+          const v = (tmp[ym1 * w + x] + 2 * tmp[y * w + x] + tmp[yp1 * w + x]) * 0.25;
+          out[y * w + x] = v;
+        }
+      }
+      return out;
+    }
+
+    function sobelEdges(gray, w, h, thr) {
+      const out = new Uint8ClampedArray(w * h * 4);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          const gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1] + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
+          const gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1] + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
+          const mag = Math.abs(gx) + Math.abs(gy);
+          const v = mag > thr * 8 ? 255 : 0;
+          const p = i * 4;
+          out[p] = v; out[p + 1] = v; out[p + 2] = v; out[p + 3] = 255;
+        }
+      }
+      return out;
+    }
+
+    function temporalSmoothEdges(edgeRgba, w, h, alpha = 0.35, onThresh = 140) {
+      if (!edgeSmooth || edgeSmoothW !== w || edgeSmoothH !== h) {
+        edgeSmooth = new Float32Array(w * h);
+        edgeSmoothW = w;
+        edgeSmoothH = h;
+      }
+      for (let i = 0, p = 0; i < edgeSmooth.length; i++, p += 4) {
+        const cur = edgeRgba[p];
+        edgeSmooth[i] = edgeSmooth[i] * (1 - alpha) + cur * alpha;
+        const v = edgeSmooth[i] >= onThresh ? 255 : 0;
+        edgeRgba[p] = v;
+        edgeRgba[p + 1] = v;
+        edgeRgba[p + 2] = v;
+        edgeRgba[p + 3] = 255;
+      }
+    }
+
+    function clampRoi() {
+      roi.w = Math.max(40, Math.min(roi.w, cv.width));
+      roi.h = Math.max(40, Math.min(roi.h, cv.height));
+      roi.x = Math.max(0, Math.min(roi.x, cv.width - roi.w));
+      roi.y = Math.max(0, Math.min(roi.y, cv.height - roi.h));
+    }
+
+    function drawRoiOverlay() {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,255,180,0.95)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
+      ctx.restore();
+    }
+
+    function angleDelta180(a, b) {
+      let d = Math.abs(a - b) % 180;
+      if (d > 90) d = 180 - d;
+      return d;
+    }
+
+    function normalize360(a) {
+      let v = a % 360;
+      if (v < 0) v += 360;
+      return v;
+    }
+
+    function angleDelta360(a, b) {
+      let d = Math.abs(a - b) % 360;
+      if (d > 180) d = 360 - d;
+      return d;
+    }
+
+    function averageAngles360(angles) {
+      if (!angles.length) return null;
+      let s = 0, c = 0;
+      for (let i = 0; i < angles.length; i++) {
+        const r = (angles[i] * Math.PI) / 180;
+        s += Math.sin(r);
+        c += Math.cos(r);
+      }
+      return normalize360((Math.atan2(s, c) * 180) / Math.PI);
+    }
+
+    function pushAngleAverage(slot, angleDeg, maxN = 5, maxDelta = 20) {
+      const h = angleHistory[slot];
+      if (h.length) {
+        const preAvg = averageAngles360(h);
+        if (angleDelta360(angleDeg, preAvg) > maxDelta) {
+          return preAvg;
+        }
+      }
+      h.push(angleDeg);
+      if (h.length > maxN) h.shift();
+      return averageAngles360(h);
+    }
+
+    function connectedEdgeComponents(edgeRgba, w, h, minSize = 40) {
+      const mask = new Uint8Array(w * h);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const p = (y * w + x) * 4;
+          if (edgeRgba[p] > 0) mask[y * w + x] = 1;
+        }
+      }
+      const vis = new Uint8Array(w * h);
+      const q = new Int32Array(w * h);
+      const comps = [];
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i] || vis[i]) continue;
+        let head = 0, tail = 0;
+        q[tail++] = i;
+        vis[i] = 1;
+        const pts = [];
+        while (head < tail) {
+          const idx = q[head++];
+          const y = (idx / w) | 0;
+          const x = idx - y * w;
+          pts.push({ x, y });
+          for (let oy = -1; oy <= 1; oy++) {
+            for (let ox = -1; ox <= 1; ox++) {
+              if (ox === 0 && oy === 0) continue;
+              const nx = x + ox, ny = y + oy;
+              if (nx < 1 || ny < 1 || nx >= w - 1 || ny >= h - 1) continue;
+              const ni = ny * w + nx;
+              if (!mask[ni] || vis[ni]) continue;
+              vis[ni] = 1;
+              q[tail++] = ni;
+            }
+          }
+        }
+        if (pts.length >= minSize) comps.push(pts);
+      }
+      return comps;
+    }
+
+    function extractLongestLines(edgeRgba, w, h, maxLines = 5) {
+      const comps = connectedEdgeComponents(edgeRgba, w, h, 45);
+      if (!comps.length) return [];
+      const lines = [];
+
+      for (let cidx = 0; cidx < comps.length; cidx++) {
+        let remaining = comps[cidx].slice();
+        while (remaining.length > 1800) remaining.splice((Math.random() * remaining.length) | 0, 1);
+
+        // Pull up to 2 strong lines per connected component.
+        for (let pull = 0; pull < 2; pull++) {
+          if (remaining.length < 30) break;
+          let best = null;
+          for (let it = 0; it < 80; it++) {
+            const i = (Math.random() * remaining.length) | 0;
+            const j = (Math.random() * remaining.length) | 0;
+            if (i === j) continue;
+            const p1 = remaining[i], p2 = remaining[j];
+            const dx = p2.x - p1.x, dy = p2.y - p1.y;
+            const len = Math.hypot(dx, dy);
+            if (len < 8) continue;
+            const ux = dx / len, uy = dy / len;
+            const nx = -uy, ny = ux;
+            let minT = 1e9, maxT = -1e9, inliers = 0;
+            const tVals = [];
+            const inlierMask = new Uint8Array(remaining.length);
+            for (let m = 0; m < remaining.length; m++) {
+              const qpt = remaining[m];
+              const rx = qpt.x - p1.x, ry = qpt.y - p1.y;
+              const dist = Math.abs(rx * nx + ry * ny);
+              if (dist <= 1.8) {
+                inlierMask[m] = 1;
+                inliers++;
+                const t = rx * ux + ry * uy;
+                tVals.push(t);
+                if (t < minT) minT = t;
+                if (t > maxT) maxT = t;
+              }
+            }
+            if (inliers < 24) continue;
+            const span = maxT - minT;
+            if (span < 26) continue;
+
+            tVals.sort((a, b) => a - b);
+            let maxGap = 0;
+            for (let q = 0; q + 1 < tVals.length; q++) {
+              const g = tVals[q + 1] - tVals[q];
+              if (g > maxGap) maxGap = g;
+            }
+            const bins = Math.max(12, Math.min(80, Math.floor(span / 3.5)));
+            const occ = new Uint8Array(bins);
+            for (let q = 0; q < tVals.length; q++) {
+              const bi = Math.max(0, Math.min(bins - 1, Math.floor(((tVals[q] - minT) / (span || 1)) * bins)));
+              occ[bi] = 1;
+            }
+            let occCount = 0;
+            for (let q = 0; q < bins; q++) occCount += occ[q];
+            const occupancy = occCount / bins;
+            const maxAllowedGap = Math.max(7, span * 0.16);
+            if (maxGap > maxAllowedGap) continue;
+            if (occupancy < 0.48) continue;
+
+            const score = span + inliers * 0.15 + occupancy * 35 - maxGap * 1.4;
+            if (!best || score > best.score) {
+              best = { score, inlierMask, p1, ux, uy, minT, maxT, span };
+            }
+          }
+          if (!best) break;
+          lines.push({
+            x1: best.p1.x + best.ux * best.minT,
+            y1: best.p1.y + best.uy * best.minT,
+            x2: best.p1.x + best.ux * best.maxT,
+            y2: best.p1.y + best.uy * best.maxT,
+            len: best.span
+          });
+          const next = [];
+          for (let m = 0; m < remaining.length; m++) if (!best.inlierMask[m]) next.push(remaining[m]);
+          remaining = next;
+        }
+      }
+
+      lines.sort((a, b) => b.len - a.len);
+      return lines.slice(0, maxLines);
+    }
+
+    function extractVerticalBars(edgeRgba, w, h, maxBars = 10) {
+      const pts = [];
+      const col = new Uint16Array(w);
+      for (let y = 1; y < h - 1; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const p = (y * w + x) * 4;
+          if (edgeRgba[p] > 0) {
+            pts.push({ x, y });
+            col[x]++;
+          }
+        }
+      }
+      if (pts.length < 80) return [];
+
+      // Smooth 1D column votes.
+      const smooth = new Float32Array(w);
+      for (let x = 0; x < w; x++) {
+        const xm2 = Math.max(0, x - 2), xm1 = Math.max(0, x - 1), xp1 = Math.min(w - 1, x + 1), xp2 = Math.min(w - 1, x + 2);
+        smooth[x] = (col[xm2] + 2 * col[xm1] + 3 * col[x] + 2 * col[xp1] + col[xp2]) / 9;
+      }
+
+      // Peak pick with non-max suppression.
+      const peaks = [];
+      const minVote = Math.max(8, h * 0.08);
+      for (let x = 2; x < w - 2; x++) {
+        const v = smooth[x];
+        if (v < minVote) continue;
+        if (v >= smooth[x - 1] && v >= smooth[x + 1]) peaks.push({ x, v });
+      }
+      peaks.sort((a, b) => b.v - a.v);
+      const selected = [];
+      for (let i = 0; i < peaks.length && selected.length < maxBars; i++) {
+        let ok = true;
+        for (let j = 0; j < selected.length; j++) {
+          if (Math.abs(peaks[i].x - selected[j].x) < 8) { ok = false; break; }
+        }
+        if (ok) selected.push(peaks[i]);
+      }
+
+      const bars = [];
+      for (let i = 0; i < selected.length; i++) {
+        const x0 = selected[i].x;
+        let n = 0, sumY = 0, sumX = 0, sumYY = 0, sumYX = 0;
+        let yMin = 1e9, yMax = -1e9;
+        for (let k = 0; k < pts.length; k++) {
+          const p = pts[k];
+          if (Math.abs(p.x - x0) > 3) continue;
+          n++; sumY += p.y; sumX += p.x; sumYY += p.y * p.y; sumYX += p.y * p.x;
+          if (p.y < yMin) yMin = p.y;
+          if (p.y > yMax) yMax = p.y;
+        }
+        if (n < 25 || yMax - yMin < 20) continue;
+        const den = n * sumYY - sumY * sumY;
+        const a = Math.abs(den) < 1e-6 ? 0 : (n * sumYX - sumY * sumX) / den; // x = a*y + b
+        const b = (sumX - a * sumY) / n;
+        const x1 = a * yMin + b, x2 = a * yMax + b;
+        const len = Math.hypot(x2 - x1, yMax - yMin);
+        const ang = (((Math.atan2(yMax - yMin, x2 - x1) * 180 / Math.PI) % 180) + 180) % 180;
+        bars.push({ x1, y1: yMin, x2, y2: yMax, len, ang });
+      }
+      bars.sort((a, b) => b.len - a.len);
+      return bars.slice(0, maxBars);
+    }
+
+    function averageAngles180(angles) {
+      if (!angles.length) return null;
+      let s = 0, c = 0;
+      for (let i = 0; i < angles.length; i++) {
+        const r = (angles[i] * 2 * Math.PI) / 180;
+        s += Math.sin(r);
+        c += Math.cos(r);
+      }
+      let a = (Math.atan2(s, c) * 180) / Math.PI / 2;
+      if (a < 0) a += 180;
+      return a;
+    }
+
+    function houghAverageAngle(edgeRgba, w, h, maxLines = 5, redCentroid = null) {
+      const pts = [];
+      for (let y = 1; y < h - 1; y += 2) {
+        for (let x = 1; x < w - 1; x += 2) {
+          const p = (y * w + x) * 4;
+          if (edgeRgba[p] > 0) pts.push({ x, y });
+        }
+      }
+      if (pts.length < 60) return null;
+      while (pts.length > 3200) pts.splice((Math.random() * pts.length) | 0, 1);
+
+      const thetaBins = 180;
+      const rhoMax = Math.ceil(Math.hypot(w, h));
+      const rhoBins = rhoMax * 2 + 1;
+      const acc = new Uint16Array(thetaBins * rhoBins);
+      const cosT = new Float32Array(thetaBins);
+      const sinT = new Float32Array(thetaBins);
+      for (let t = 0; t < thetaBins; t++) {
+        const r = (t * Math.PI) / 180;
+        cosT[t] = Math.cos(r);
+        sinT[t] = Math.sin(r);
+      }
+
+      for (let i = 0; i < pts.length; i++) {
+        const x = pts[i].x, y = pts[i].y;
+        for (let t = 0; t < thetaBins; t++) {
+          const rho = Math.round(x * cosT[t] + y * sinT[t]) + rhoMax;
+          acc[t * rhoBins + rho] += 1;
+        }
+      }
+
+      const peaks = [];
+      for (let t = 0; t < thetaBins; t++) {
+        for (let r = 1; r < rhoBins - 1; r++) {
+          const v = acc[t * rhoBins + r];
+          if (v < 20) continue;
+          if (v < acc[t * rhoBins + r - 1] || v < acc[t * rhoBins + r + 1]) continue;
+          peaks.push({ t, r, v });
+        }
+      }
+      if (!peaks.length) return null;
+      peaks.sort((a, b) => b.v - a.v);
+      const picked = [];
+      for (let i = 0; i < peaks.length && picked.length < maxLines; i++) {
+        let ok = true;
+        for (let j = 0; j < picked.length; j++) {
+          if (Math.abs(peaks[i].t - picked[j].t) < 4 && Math.abs(peaks[i].r - picked[j].r) < 14) { ok = false; break; }
+        }
+        if (ok) picked.push(peaks[i]);
+      }
+      if (!picked.length) return null;
+
+      const angles = [];
+      for (let i = 0; i < picked.length; i++) {
+        const t = picked[i].t;
+        const ct = cosT[t], st = sinT[t];
+        const rho = picked[i].r - rhoMax;
+        const ptsOnBorder = [];
+        if (Math.abs(st) > 1e-6) {
+          let y = (rho - 0 * ct) / st;
+          if (y >= 0 && y <= h - 1) ptsOnBorder.push({ x: 0, y });
+          y = (rho - (w - 1) * ct) / st;
+          if (y >= 0 && y <= h - 1) ptsOnBorder.push({ x: w - 1, y });
+        }
+        if (Math.abs(ct) > 1e-6) {
+          let x = (rho - 0 * st) / ct;
+          if (x >= 0 && x <= w - 1) ptsOnBorder.push({ x, y: 0 });
+          x = (rho - (h - 1) * st) / ct;
+          if (x >= 0 && x <= w - 1) ptsOnBorder.push({ x, y: h - 1 });
+        }
+        if (ptsOnBorder.length < 2) continue;
+        let p1 = ptsOnBorder[0], p2 = ptsOnBorder[1], bestD = -1;
+        for (let a = 0; a < ptsOnBorder.length; a++) {
+          for (let b = a + 1; b < ptsOnBorder.length; b++) {
+            const dx = ptsOnBorder[b].x - ptsOnBorder[a].x;
+            const dy = ptsOnBorder[b].y - ptsOnBorder[a].y;
+            const d = dx * dx + dy * dy;
+            if (d > bestD) { bestD = d; p1 = ptsOnBorder[a]; p2 = ptsOnBorder[b]; }
+          }
+        }
+
+        if (redCentroid) {
+          const d1 = (p1.x - redCentroid.x) * (p1.x - redCentroid.x) + (p1.y - redCentroid.y) * (p1.y - redCentroid.y);
+          const d2 = (p2.x - redCentroid.x) * (p2.x - redCentroid.x) + (p2.y - redCentroid.y) * (p2.y - redCentroid.y);
+          const tip = d1 <= d2 ? p1 : p2;
+          const tail = d1 <= d2 ? p2 : p1;
+          angles.push(normalize360((Math.atan2(tip.y - tail.y, tip.x - tail.x) * 180) / Math.PI));
+        } else {
+          angles.push(((t + 90) % 180 + 180) % 180);
+        }
+      }
+      if (!angles.length) return null;
+
+      if (redCentroid) {
+        const seed = averageAngles360(angles);
+        const filtered = angles.filter((a) => angleDelta360(a, seed) <= 20);
+        return averageAngles360(filtered.length ? filtered : angles);
+      }
+      const seed = averageAngles180(angles);
+      const filtered = angles.filter((a) => angleDelta180(a, seed) <= 20);
+      return averageAngles180(filtered.length ? filtered : angles);
+    }
+
+    function detectRedCentroid(d, frameW, rx0, ry0, rw, rh) {
+      let sx = 0, sy = 0, n = 0;
+      for (let y = 0; y < rh; y++) {
+        const fy = ry0 + y;
+        for (let x = 0; x < rw; x++) {
+          const fx = rx0 + x;
+          const p = (fy * frameW + fx) * 4;
+          const r = d[p], g = d[p + 1], b = d[p + 2];
+          if (r > 150 && r - g > 55 && r - b > 55) {
+            sx += x;
+            sy += y;
+            n++;
+          }
+        }
+      }
+      if (n < 10) return null;
+      return { x: sx / n, y: sy / n };
+    }
+
+    function smoothHough(frameAngle) {
+      if (frameAngle === null || frameAngle === undefined) {
+        houghHistory.length = 0;
+        return null;
+      }
+      const win = Math.max(1, parseInt(houghWindowEl.value, 10) || 5);
+      houghWindowValEl.textContent = String(win);
+      houghHistory.push(frameAngle);
+      if (houghHistory.length > win) houghHistory.splice(0, houghHistory.length - win);
+      return averageAngles360(houghHistory);
+    }
+
+    function process() {
+      if (!video.videoWidth) { raf = requestAnimationFrame(process); return; }
+      cv.width = 900;
+      cv.height = Math.round(900 * video.videoHeight / video.videoWidth);
+      roi.w = cv.width * 0.5;
+      roi.h = cv.height * 0.5;
+      roi.x = (cv.width - roi.w) / 2;
+      roi.y = (cv.height - roi.h) / 2;
+      clampRoi();
+      work.width = cv.width;
+      work.height = cv.height;
+      wctx.drawImage(video, 0, 0, work.width, work.height);
+      const frame = wctx.getImageData(0, 0, work.width, work.height);
+      const d = frame.data;
+      const rx0 = roi.x | 0, ry0 = roi.y | 0, rx1 = (roi.x + roi.w) | 0, ry1 = (roi.y + roi.h) | 0;
+      const rw = Math.max(2, rx1 - rx0);
+      const rh = Math.max(2, ry1 - ry0);
+      const gray = new Uint8Array(rw * rh);
+      for (let y = 0; y < rh; y++) {
+        const sy = ry0 + y;
+        for (let x = 0; x < rw; x++) {
+          const sx = rx0 + x;
+          const p = (sy * work.width + sx) * 4;
+          gray[y * rw + x] = (d[p] * 30 + d[p + 1] * 59 + d[p + 2] * 11) / 100;
+        }
+      }
+      const blurred = gaussianBlurGray(gray, rw, rh);
+      const edgeRgba = sobelEdges(blurred, rw, rh, parseInt(thrEl.value, 10));
+      temporalSmoothEdges(edgeRgba, rw, rh);
+      const redCentroid = detectRedCentroid(d, work.width, rx0, ry0, rw, rh);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.putImageData(new ImageData(edgeRgba, rw, rh), rx0, ry0);
+      if (justEdgesEl.checked) {
+        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
+        houghHistory.length = 0;
+        lineAnglesEl.textContent = 'Angles: -';
+        lineAvgEl.textContent = 'Lines(5) Avg: -';
+        houghAvgEl.textContent = 'Hough Avg: -';
+        barAvgEl.textContent = 'Bars(10) Avg: -';
+        drawRoiOverlay();
+        raf = requestAnimationFrame(process);
+        return;
+      }
+      if (justHoughEl.checked) {
+        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
+        lineAnglesEl.textContent = 'Angles: -';
+        lineAvgEl.textContent = 'Lines(5) Avg: -';
+        barAvgEl.textContent = 'Bars(10) Avg: -';
+        const houghRaw = houghAverageAngle(edgeRgba, rw, rh, 5, redCentroid);
+        const houghAvg = smoothHough(houghRaw);
+        houghAvgEl.textContent = houghAvg === null ? 'Hough Avg: -' : `Hough Avg: ${houghAvg.toFixed(1)}°`;
+        drawRoiOverlay();
+        raf = requestAnimationFrame(process);
+        return;
+      }
+      const lines = extractLongestLines(edgeRgba, rw, rh, 5);
+      if (lines.length) {
+        const colors = ['#ff5555', '#55ff55', '#5599ff', '#ffd84d', '#ff7dff'];
+        const angleTexts = [];
+        const smoothAngles = [];
+        ctx.save();
+        ctx.lineWidth = 2.2;
+        for (let i = 0; i < lines.length; i++) {
+          const ln = lines[i];
+          let x1 = ln.x1, y1 = ln.y1, x2 = ln.x2, y2 = ln.y2;
+          // Orient line direction toward red end-caps when present.
+          if (redCentroid) {
+            const mx = (x1 + x2) * 0.5;
+            const my = (y1 + y2) * 0.5;
+            const vx = x2 - x1;
+            const vy = y2 - y1;
+            const toRedX = redCentroid.x - mx;
+            const toRedY = redCentroid.y - my;
+            if (vx * toRedX + vy * toRedY < 0) {
+              const tx = x1, ty = y1;
+              x1 = x2; y1 = y2;
+              x2 = tx; y2 = ty;
+            }
+          }
+          const ang = normalize360((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI);
+          const avgAng = pushAngleAverage(i, ang, 5, 20);
+          smoothAngles.push(avgAng);
+          angleTexts.push(`${i + 1}:${avgAng.toFixed(1)}°`);
+          ctx.strokeStyle = colors[i % colors.length];
+          ctx.beginPath();
+          ctx.moveTo(rx0 + x1, ry0 + y1);
+          ctx.lineTo(rx0 + x2, ry0 + y2);
+          ctx.stroke();
+          // Draw red box at oriented "top" end.
+          ctx.fillStyle = '#ff2a2a';
+          ctx.fillRect(rx0 + x2 - 3, ry0 + y2 - 3, 6, 6);
+        }
+        for (let i = lines.length; i < 5; i++) angleHistory[i].length = 0;
+        ctx.restore();
+        lineAnglesEl.textContent = `Angles: ${angleTexts.join('  ')}`;
+        const seed = averageAngles360(smoothAngles);
+        const filtered = smoothAngles.filter((a) => angleDelta360(a, seed) <= 20);
+        const lineAvg = averageAngles360(filtered.length ? filtered : smoothAngles);
+        lineAvgEl.textContent = `Lines(5) Avg: ${lineAvg.toFixed(1)}°`;
+      } else {
+        for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
+        lineAnglesEl.textContent = 'Angles: -';
+        lineAvgEl.textContent = 'Lines(5) Avg: -';
+      }
+      if (redCentroid) {
+        ctx.fillStyle = '#ff2a2a';
+        ctx.fillRect(rx0 + redCentroid.x - 4, ry0 + redCentroid.y - 4, 8, 8);
+      }
+
+      const bars = extractVerticalBars(edgeRgba, rw, rh, 10);
+      if (bars.length) {
+        const rawAngles = bars.map((b) => b.ang);
+        const seed = averageAngles180(rawAngles);
+        const filtered = rawAngles.filter((a) => angleDelta180(a, seed) <= 20);
+        const avg = averageAngles180(filtered.length ? filtered : rawAngles);
+        ctx.save();
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = 'rgba(255, 120, 40, 0.95)';
+        for (let i = 0; i < bars.length; i++) {
+          const b = bars[i];
+          ctx.beginPath();
+          ctx.moveTo(rx0 + b.x1, ry0 + b.y1);
+          ctx.lineTo(rx0 + b.x2, ry0 + b.y2);
+          ctx.stroke();
+        }
+        ctx.restore();
+        barAvgEl.textContent = `Bars(${bars.length}) Avg: ${avg.toFixed(1)}°`;
+      } else {
+        barAvgEl.textContent = 'Bars(10) Avg: -';
+      }
+      const houghAvg = smoothHough(houghAverageAngle(edgeRgba, rw, rh, 5, redCentroid));
+      houghAvgEl.textContent = houghAvg === null ? 'Hough Avg: -' : `Hough Avg: ${houghAvg.toFixed(1)}°`;
+      drawRoiOverlay();
+      raf = requestAnimationFrame(process);
+    }
+
+    startBtn.onclick = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        video.srcObject = stream;
+        await video.play();
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        cancelAnimationFrame(raf);
+        process();
+      } catch (e) {
+        alert('Camera error: ' + e.message);
+      }
+    };
+
+    stopBtn.onclick = () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      video.srcObject = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      cancelAnimationFrame(raf);
+      edgeSmooth = null;
+      for (let i = 0; i < 5; i++) angleHistory[i].length = 0;
+      houghHistory.length = 0;
+      lineAnglesEl.textContent = 'Angles: -';
+      lineAvgEl.textContent = 'Lines(5) Avg: -';
+      houghAvgEl.textContent = 'Hough Avg: -';
+      barAvgEl.textContent = 'Bars(10) Avg: -';
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+    };
+
+    thrEl.oninput = () => {
+      try { localStorage.setItem(THRESHOLD_KEY, thrEl.value); } catch (e) {}
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    houghWindowEl.oninput = () => {
+      houghWindowValEl.textContent = houghWindowEl.value;
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    justEdgesEl.onchange = () => {
+      if (justEdgesEl.checked) justHoughEl.checked = false;
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    justHoughEl.onchange = () => {
+      if (justHoughEl.checked) justEdgesEl.checked = false;
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    try {
+      const saved = localStorage.getItem(THRESHOLD_KEY);
+      if (saved !== null && saved !== '') thrEl.value = saved;
+    } catch (e) {}
+    houghWindowValEl.textContent = houghWindowEl.value;
+  </script>
+</body>
+</html>

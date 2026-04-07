@@ -152,6 +152,10 @@
         Green squares
       </label>
       <label>
+        <input type="radio" name="detectMode" value="vertical">
+        Vertical pixels
+      </label>
+      <label>
         <input id="enableBluePixels" type="checkbox">
         Show blue pixels
       </label>
@@ -268,6 +272,10 @@
     <div class="metric-box">
       Avg frame time: <span id="avgFrameMs">0</span> ms
     </div>
+    <div class="metric-box">
+      Up ray bits: <span id="upRayBits">-</span>
+      | Angle: <span id="upRayAngle">-</span>
+    </div>
     <div class="canvas-wrap">
       <canvas id="preview"></canvas>
     </div>
@@ -337,6 +345,8 @@
     const redPixelMax = document.getElementById('redPixelMax');
     const redPixelAvg = document.getElementById('redPixelAvg');
     const avgFrameMs = document.getElementById('avgFrameMs');
+    const upRayBits = document.getElementById('upRayBits');
+    const upRayAngle = document.getElementById('upRayAngle');
     const enableBluePixels = document.getElementById('enableBluePixels');
     const enableLineTracking = document.getElementById('enableLineTracking');
 
@@ -354,6 +364,7 @@
     let lastCenterFull = null;
     let lastArcRadius = null;
     let lineLock = false;
+    const SETTINGS_KEY = 'green_detect_settings_v1';
 
     function updateLabels() {
       minGreenVal.textContent = minGreen.value;
@@ -383,6 +394,85 @@
         if (detectModeInputs[i].checked) return detectModeInputs[i].value;
       }
       return 'blue';
+    }
+
+    function saveSettings() {
+      try {
+        const settings = {
+          minGreen: minGreen.value,
+          delta: delta.value,
+          minArea: minArea.value,
+          downscale: downscale.value,
+          maxNeighbor: maxNeighbor.value,
+          groupGap: groupGap.value,
+          blueDelta: blueDelta.value,
+          blueMinSize: blueMinSize.value,
+          redDelta: redDelta.value,
+          minRedGroup: minRedGroup.value,
+          maxRedGroupDist: maxRedGroupDist.value,
+          maxBoundarySteps: maxBoundarySteps.value,
+          radialWhite: radialWhite.value,
+          radialMaxLines: radialMaxLines.value,
+          bandCount: bandCount.value,
+          centerFilterPx: centerFilterPx.value,
+          sections: sections.value,
+          centerWindow: centerWindow.value,
+          enableRadial: enableRadial.checked,
+          enableBlueArc: enableBlueArc.checked,
+          enableBluePixels: enableBluePixels.checked,
+          enableLineTracking: enableLineTracking.checked,
+          detectMode: currentDetectMode()
+        };
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      } catch (err) {
+        // ignore storage errors
+      }
+    }
+
+    function setIfPresent(el, value) {
+      if (value === undefined || value === null) return;
+      el.value = String(value);
+    }
+
+    function loadSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (!raw) return;
+        const settings = JSON.parse(raw);
+        setIfPresent(minGreen, settings.minGreen);
+        setIfPresent(delta, settings.delta);
+        setIfPresent(minArea, settings.minArea);
+        setIfPresent(downscale, settings.downscale);
+        setIfPresent(maxNeighbor, settings.maxNeighbor);
+        setIfPresent(groupGap, settings.groupGap);
+        setIfPresent(blueDelta, settings.blueDelta);
+        setIfPresent(blueMinSize, settings.blueMinSize);
+        setIfPresent(redDelta, settings.redDelta);
+        setIfPresent(minRedGroup, settings.minRedGroup);
+        setIfPresent(maxRedGroupDist, settings.maxRedGroupDist);
+        setIfPresent(maxBoundarySteps, settings.maxBoundarySteps);
+        setIfPresent(radialWhite, settings.radialWhite);
+        setIfPresent(radialMaxLines, settings.radialMaxLines);
+        setIfPresent(bandCount, settings.bandCount);
+        setIfPresent(centerFilterPx, settings.centerFilterPx);
+        setIfPresent(sections, settings.sections);
+        setIfPresent(centerWindow, settings.centerWindow);
+        if (typeof settings.enableRadial === 'boolean') enableRadial.checked = settings.enableRadial;
+        if (typeof settings.enableBlueArc === 'boolean') enableBlueArc.checked = settings.enableBlueArc;
+        if (typeof settings.enableBluePixels === 'boolean') enableBluePixels.checked = settings.enableBluePixels;
+        if (typeof settings.enableLineTracking === 'boolean') enableLineTracking.checked = settings.enableLineTracking;
+        if (
+          settings.detectMode === 'blue' ||
+          settings.detectMode === 'green' ||
+          settings.detectMode === 'vertical'
+        ) {
+          detectModeInputs.forEach((input) => {
+            input.checked = input.value === settings.detectMode;
+          });
+        }
+      } catch (err) {
+        // ignore storage errors
+      }
     }
 
     function clusterByNearest(points, maxDist) {
@@ -966,6 +1056,69 @@
         reduced.push(avg > 0.5 ? 1 : 0);
       }
       return reduced;
+    }
+
+    function grayToBinaryInt(grayValue) {
+      let binary = grayValue;
+      for (let shift = 1; shift < 32; shift <<= 1) {
+        binary ^= (binary >> shift);
+      }
+      return binary >>> 0;
+    }
+
+    function decodeUpRayAngle(frameData, cx, cy, bandCountInt) {
+      const baseAngle = (270 * Math.PI) / 180; // straight upward in canvas coordinates
+      const rawBits = sampleSubdividingLineRawBits(frameData, cx, cy, baseAngle, 180);
+      const reducedBits = rawBits ? reduceBitsByBands(rawBits, bandCountInt) : null;
+      if (!reducedBits || !reducedBits.length) {
+        return null;
+      }
+
+      const bitString = reducedBits.join('');
+      const maxPos = 1 << bandCountInt;
+      const grayValue = parseInt(bitString, 2);
+      const binaryValue = grayToBinaryInt(grayValue) & (maxPos - 1);
+      const angleDeg = (binaryValue / maxPos) * 360;
+      return { bitString, angleDeg };
+    }
+
+    function decodeBitStringToAngle(bitString, bandCountInt) {
+      if (!bitString || bitString.includes('-')) return null;
+      const maxPos = 1 << bandCountInt;
+      const grayValue = parseInt(bitString, 2);
+      if (!Number.isFinite(grayValue)) return null;
+      const binaryValue = grayToBinaryInt(grayValue) & (maxPos - 1);
+      return (binaryValue / maxPos) * 360;
+    }
+
+    function sampleVerticalColumnRawBits(imageData, x, whiteThresh) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const bits = [];
+      const sx = Math.max(1, Math.min(width - 2, Math.round(x)));
+
+      for (let y = 0; y < height; y++) {
+        let sum = 0;
+        let count = 0;
+        for (let ox = -1; ox <= 1; ox++) {
+          const px = sx + ox;
+          if (px < 0 || px >= width) continue;
+          const idx = (y * width + px) * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          sum += (r + g + b) / 3;
+          count += 1;
+        }
+        if (!count) {
+          bits.push(0);
+          continue;
+        }
+        bits.push(sum / count >= whiteThresh ? 1 : 0);
+      }
+
+      return bits;
     }
 
     function findBluePoints(imageData, width, height) {
@@ -2136,6 +2289,14 @@
       preview.width = video.videoWidth;
       preview.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, preview.width, preview.height);
+      const fixedCenterFull = {
+        x: preview.width / 2,
+        y: preview.height / 2
+      };
+      const fixedCenterScaled = {
+        x: targetWidth / 2,
+        y: targetHeight / 2
+      };
 
       let raysResult = null;
       let currentCenterFull = null;
@@ -2306,6 +2467,11 @@
       }
 
       if (mode === 'blue') {
+        currentCenterFull = fixedCenterFull;
+        lastCenterFull = fixedCenterFull;
+        if (!raysResult) raysResult = { center: null, rays: [] };
+        raysResult.center = fixedCenterScaled;
+
         const bluePoints = findBluePoints(
           imageData,
           targetWidth,
@@ -2459,13 +2625,24 @@
           binaryColumns.innerHTML = columns
             .map((bits) => `<div class="col">${bits}</div>`)
             .join('');
+
+          const upDecode = decodeUpRayAngle(fullFrame, centerX, centerY, bandCountInt);
+          if (upDecode) {
+            upRayBits.textContent = upDecode.bitString;
+            upRayAngle.textContent = `${upDecode.angleDeg.toFixed(1)}°`;
+          } else {
+            upRayBits.textContent = '-';
+            upRayAngle.textContent = '-';
+          }
         } else {
           rawLineBits.textContent = '(no data)';
           allLineBits.textContent = '';
           binaryColumns.textContent = '';
+          upRayBits.textContent = '-';
+          upRayAngle.textContent = '-';
         }
         lastNCenters.length = 0;
-      } else {
+      } else if (mode === 'green') {
         const centers = detectGreenCenters(
           imageData,
           targetWidth,
@@ -2536,6 +2713,7 @@
         } else {
           lastNCenters.length = 0;
         }
+        sharedCenter = { cx: fixedCenterFull.x, cy: fixedCenterFull.y };
 
         const arcInfos = sharedCenter
           ? arcFits.map((item) => {
@@ -2697,14 +2875,6 @@
           }
           ctx.stroke();
         });
-        ctx.fillStyle = 'rgba(0, 200, 255, 0.9)';
-        for (let i = 0; i < fullRadialHits.length; i++) {
-          const x = fullRadialHits[i].x;
-          const y = fullRadialHits[i].y;
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, Math.PI * 2);
-          ctx.fill();
-        }
         ctx.restore();
 
         if (sharedCenter && arcInfos.length === 2) {
@@ -2720,11 +2890,15 @@
               const y1 = sharedCenter.cy + inner.r * Math.sin(angle);
               const x2 = sharedCenter.cx + outer.r * Math.cos(angle);
               const y2 = sharedCenter.cy + outer.r * Math.sin(angle);
-              return sampleLineBits(frameData, x1, y1, x2, y2, sectionCount);
+              const angleDeg = ((angle * 180) / Math.PI + 360) % 360;
+              return {
+                angleDeg,
+                bits: sampleLineBits(frameData, x1, y1, x2, y2, sectionCount)
+              };
             });
             binaryColumns.style.fontSize = '13px';
             binaryColumns.innerHTML = columns
-              .map((bits) => `<div class="col">${bits.join(' ')}</div>`)
+              .map((entry) => `<div class="col">${entry.angleDeg.toFixed(1)}°: ${entry.bits.join(' ')}</div>`)
               .join('');
           } else {
             binaryColumns.textContent = '';
@@ -2733,9 +2907,58 @@
           binaryColumns.textContent = '';
         }
 
+        const bandCountInt = parseInt(bandCount.value, 10);
+        const frameData = ctx.getImageData(0, 0, preview.width, preview.height);
+        const upDecode = decodeUpRayAngle(
+          frameData,
+          sharedCenter.cx,
+          sharedCenter.cy,
+          bandCountInt
+        );
+        if (upDecode) {
+          rawLineBits.style.fontSize = '11px';
+          rawLineBits.textContent = upDecode.bitString;
+          upRayBits.textContent = upDecode.bitString;
+          upRayAngle.textContent = `${upDecode.angleDeg.toFixed(1)}°`;
+        } else {
+          rawLineBits.textContent = '(no data)';
+          upRayBits.textContent = '-';
+          upRayAngle.textContent = '-';
+        }
+
         statusEl.textContent = `Detected ${centers.length} green regions in ${arcClusters.length} arcs`;
         lastRgbPoint = null;
         squareCount.textContent = centers.length;
+      } else {
+        const fullFrame = ctx.getImageData(0, 0, preview.width, preview.height);
+        const bandCountInt = parseInt(bandCount.value, 10);
+        const centerX = Math.round(preview.width / 2);
+        const whiteThresh = 125;
+        const rawBits = sampleVerticalColumnRawBits(fullFrame, centerX, whiteThresh);
+        const reducedBits = reduceBitsByBands(rawBits, bandCountInt);
+        const bitString = reducedBits ? reducedBits.join('') : '(no data)';
+        const angle = reducedBits ? decodeBitStringToAngle(bitString, bandCountInt) : null;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 220, 0, 0.95)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, 0);
+        ctx.lineTo(centerX, preview.height);
+        ctx.stroke();
+        ctx.restore();
+
+        rawLineBits.style.fontSize = '14px';
+        rawLineBits.textContent = bitString;
+        allLineBits.textContent = bitString;
+        binaryColumns.style.fontSize = '14px';
+        binaryColumns.innerHTML = `<div class="col">vertical: ${bitString}${angle === null ? '' : ` | ${angle.toFixed(1)}°`}</div>`;
+        upRayBits.textContent = bitString;
+        upRayAngle.textContent = angle === null ? '-' : `${angle.toFixed(1)}°`;
+        statusEl.textContent = angle === null
+          ? 'Vertical mode: center column sampled'
+          : `Vertical mode: center column sampled | ${angle.toFixed(1)}°`;
+        squareCount.textContent = '1';
       }
       const frameMs = performance.now() - frameStart;
       frameStats.frames += 1;
@@ -2786,10 +3009,18 @@
     detectModeInputs.forEach((input) => {
       input.addEventListener('change', updateLabels);
     });
+    const persistInputs = document.querySelectorAll('.controls input');
+    persistInputs.forEach((input) => {
+      input.addEventListener('input', saveSettings);
+      input.addEventListener('change', saveSettings);
+    });
     toggleControls.addEventListener('click', () => {
       controls.classList.toggle('collapsed');
+      toggleControls.textContent = controls.classList.contains('collapsed') ? '+' : '−';
     });
+    loadSettings();
     updateLabels();
+    toggleControls.textContent = controls.classList.contains('collapsed') ? '+' : '−';
   </script>
 </body>
 </html>
