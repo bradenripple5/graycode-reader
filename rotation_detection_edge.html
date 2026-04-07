@@ -522,10 +522,6 @@
     }
 
     function smoothHough(frameAngle) {
-      if (frameAngle === null || frameAngle === undefined) {
-        houghHistory.length = 0;
-        return null;
-      }
       function gaussianPdf(x, mu, sigma) {
         const s = Math.max(1e-6, sigma);
         const z = (x - mu) / s;
@@ -533,6 +529,10 @@
       }
       const win = Math.max(1, parseInt(houghWindowEl.value, 10) || 5);
       houghWindowValEl.textContent = String(win);
+      if (frameAngle === null || frameAngle === undefined) {
+        houghHistory.length = 0;
+        return null;
+      }
       houghHistory.push(frameAngle);
       if (houghHistory.length > win) houghHistory.splice(0, houghHistory.length - win);
       const n = houghHistory.length;

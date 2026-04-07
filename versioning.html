@@ -1,206 +1,49 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HTML Versioning</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>All HTML Pages</title>
   <style>
-    :root {
-      color-scheme: light;
-    }
-    body {
-      margin: 0;
-      padding: 24px;
-      font-family: "Times New Roman", serif;
-      background: #f7f3ea;
-      color: #1c1c1c;
-    }
-    h1 {
-      margin: 0 0 8px;
-    }
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(200px, 320px) 1fr;
-      gap: 24px;
-    }
-    .panel {
-      background: #fffdf6;
-      border: 1px solid #d8cfc0;
-      padding: 16px;
-      border-radius: 8px;
-    }
-    ul {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-    li + li {
-      margin-top: 8px;
-    }
-    button.file {
-      display: block;
-      width: 100%;
-      text-align: left;
-      background: #f1e6d0;
-      border: 1px solid #c9b693;
-      padding: 8px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button.file.active {
-      background: #ffe6b8;
-      border-color: #c99b3f;
-    }
-    .meta {
-      font-size: 14px;
-      line-height: 1.4;
-      background: #fff;
-      border: 1px solid #e0d5c0;
-      border-radius: 6px;
-      padding: 12px;
-      min-height: 120px;
-      white-space: pre-line;
-    }
-    .nav-row {
-      margin: 16px 0 8px;
-    }
-    .nav-buttons {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .nav-label {
-      flex: 1;
-      font-size: 13px;
-      color: #4e3a10;
-    }
-    .nav-btn {
-      width: 32px;
-      height: 32px;
-      border: 1px solid #c9b693;
-      background: #f1e6d0;
-      border-radius: 6px;
-      cursor: pointer;
-      position: relative;
-    }
-    .nav-btn:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .nav-btn.triangle::before {
-      content: "";
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 0;
-      height: 0;
-      border-top: 7px solid transparent;
-      border-bottom: 7px solid transparent;
-    }
-    .nav-btn.left::before {
-      border-right: 10px solid #6b5120;
-      margin-left: -2px;
-    }
-    .nav-btn.right::before {
-      border-left: 10px solid #6b5120;
-      margin-left: 2px;
-    }
-    .content {
-      width: 100%;
-      min-height: 200px;
-      margin-top: 12px;
-      padding: 10px;
-      font-family: "Courier New", monospace;
-      font-size: 12px;
-      border-radius: 6px;
-      border: 1px solid #e0d5c0;
-      background: #fff;
-      box-sizing: border-box;
-    }
-    .diff-view {
-      margin-top: 12px;
-      padding: 10px;
-      border-radius: 6px;
-      border: 1px solid #e0d5c0;
-      background: #fff;
-      font-family: "Courier New", monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      max-height: 320px;
-      overflow: auto;
-    }
-    .diff-line.add {
-      background: #e5f6df;
-      color: #1d5a1a;
-    }
-    .diff-line.remove {
-      background: #fbe1e1;
-      color: #7a1b1b;
-    }
-    .diff-line.same {
-      color: #444;
-    }
-    .submit-row {
-      margin-top: 12px;
-    }
-    .submit-row button {
-      padding: 8px 14px;
-      border-radius: 6px;
-      border: 1px solid #c9b693;
-      background: #f1e6d0;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .submit-row button:disabled {
-      opacity: 0.6;
-      cursor: default;
-    }
-    .status {
-      margin-top: 10px;
-      font-size: 12px;
-      color: #654c1a;
-    }
-    .hint {
-      font-size: 12px;
-      color: #666;
-    }
-    @media (max-width: 800px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-    }
+    body { margin: 0; font-family: sans-serif; background: #f4f4f4; color: #1a1a1a; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0 0 8px; }
+    p { margin: 0 0 16px; color: #444; }
+    ul { margin: 0; padding-left: 18px; }
+    li { margin: 6px 0; }
+    a { color: #1f4db8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <h1>HTML Versioning</h1>
-  <p class="hint">Select a file to see snapshot history (based on .codex_snapshots).</p>
-  <div class="layout">
-    <div class="panel">
-      <h2>Files</h2>
-      <ul id="fileList"></ul>
-    </div>
-    <div class="panel">
-      <h2 id="fileTitle">Choose a file</h2>
-      <div class="nav-row" id="navRow" hidden>
-        <div class="nav-buttons">
-          <button class="nav-btn triangle left" id="backBtn" aria-label="Older snapshot"></button>
-          <div class="nav-label" id="navLabel">Current file</div>
-          <button class="nav-btn triangle right" id="forwardBtn" aria-label="Newer snapshot"></button>
-        </div>
-      </div>
-      <div class="meta" id="meta">No file selected.</div>
-      <textarea class="content" id="contentArea" hidden></textarea>
-      <div class="diff-view" id="diffView" hidden></div>
-      <div class="submit-row">
-        <button id="submitBtn" disabled>Submit change</button>
-      </div>
-      <div class="status" id="status"></div>
-    </div>
+  <div class="wrap">
+    <h1>All HTML Pages</h1>
+    <p>Direct links to each page.</p>
+    <ul>
+      <li><a href="./YOLOv8%20Barcode%20Detection.html">YOLOv8 Barcode Detection.html</a></li>
+      <li><a href="./ascii_cam.html">ascii_cam.html</a></li>
+      <li><a href="./barcode_detection_by_detection_of_repeating_lines.html">barcode_detection_by_detection_of_repeating_lines.html</a></li>
+      <li><a href="./barcode_finder.html">barcode_finder.html</a></li>
+      <li><a href="./basic_camera_view.html">basic_camera_view.html</a></li>
+      <li><a href="./basic_upc_reader.html">basic_upc_reader.html</a></li>
+      <li><a href="./binary_cam.html">binary_cam.html</a></li>
+      <li><a href="./binary_cam_with_rotations.html">binary_cam_with_rotations.html</a></li>
+      <li><a href="./binary_radial_pattern.html">binary_radial_pattern.html</a></li>
+      <li><a href="./find_barcodes.html">find_barcodes.html</a></li>
+      <li><a href="./further_pixel_analysis_for_barcode_scanning.html">further_pixel_analysis_for_barcode_scanning.html</a></li>
+      <li><a href="./graycode_reader.html">graycode_reader.html</a></li>
+      <li><a href="./graycode_reader_chatgpt_based.html">graycode_reader_chatgpt_based.html</a></li>
+      <li><a href="./green_detect.html">green_detect.html</a></li>
+      <li><a href="./index.html">index.html</a></li>
+      <li><a href="./marker_tracker.html">marker_tracker.html</a></li>
+      <li><a href="./ml_based_barcode_detector.html">ml_based_barcode_detector.html</a></li>
+      <li><a href="./rotating_marker.html">rotating_marker.html</a></li>
+      <li><a href="./rotation_detection_edge.html">rotation_detection_edge.html</a></li>
+      <li><a href="./test.html">test.html</a></li>
+      <li><a href="./traditional_scanner.html">traditional_scanner.html</a></li>
+      <li><a href="./upc_reader.html">upc_reader.html</a></li>
+      <li><a href="./update-test.html">update-test.html</a></li>
+    </ul>
   </div>
-
-  <script src="vendor/diff.min.js"></script>
-  <script type="module" src="versioning.js"></script>
 </body>
 </html>
