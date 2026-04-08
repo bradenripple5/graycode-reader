@@ -12,6 +12,16 @@
     .toggle-btn { width: 34px; height: 34px; font-size: 20px; line-height: 1; }
     #advancedControls { display: none; }
     canvas { width: 100%; background: #111; border-radius: 6px; }
+    .mid-bits {
+      margin-top: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 9px;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+      color: #222;
+    }
   </style>
 </head>
 <body>
@@ -24,14 +34,24 @@
     <div id="advancedControls" class="row">
       <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
       <label>hough avg window <span id="houghWindowVal">5</span> <input id="houghWindow" type="range" min="1" max="30" value="5" /></label>
+      <label>MC points <span id="mcPointsVal">1200</span> <input id="mcPoints" type="range" min="100" max="5000" step="50" value="1200" /></label>
+      <label>intersections target <span id="intersectionTargetVal">300</span> <input id="intersectionTarget" type="range" min="20" max="1200" step="10" value="300" /></label>
+      <label><input id="mcMode" type="checkbox" /> binary monte carlo</label>
+      <label><input id="checkerMode" type="checkbox" /> checker run-length angle</label>
+      <label><input id="intersectionMode" type="checkbox" /> checker intersections</label>
+      <label><input id="centerPerpMode" type="checkbox" checked /> find- perpendicular vectors along center column</label>
       <label><input id="justEdges" type="checkbox" /> just edge detection</label>
-      <label><input id="justHough" type="checkbox" checked /> just hough (make sure the vertical bars are the only thing in view)</label>
+      <label><input id="justHough" type="checkbox" /> just hough (make sure the vertical bars are the only thing in view)</label>
       <span id="detectStatus">Status: idle</span>
+      <span id="redUp">Red Up: -</span>
+      <span id="binStats">Binary: -</span>
+      <span id="intersectionStats">Intersections: -</span>
       <span id="lineAngles">Angles: -</span>
-      <span id="lineAvg">Lines(10) Gaussian Avg: -</span>
+      <span id="lineAvg">Lines(20) Gaussian Avg: -</span>
       <span id="barAvg">Bars(10) Avg: -</span>
     </div>
     <canvas id="cv" width="900" height="560"></canvas>
+    <div id="midBits" class="mid-bits">mid row bits: -</div>
   </div>
   <video id="video" playsinline style="display:none"></video>
 
@@ -44,21 +64,34 @@
     const thrEl = document.getElementById('thr');
     const houghWindowEl = document.getElementById('houghWindow');
     const houghWindowValEl = document.getElementById('houghWindowVal');
+    const mcPointsEl = document.getElementById('mcPoints');
+    const mcPointsValEl = document.getElementById('mcPointsVal');
+    const intersectionTargetEl = document.getElementById('intersectionTarget');
+    const intersectionTargetValEl = document.getElementById('intersectionTargetVal');
+    const mcModeEl = document.getElementById('mcMode');
+    const checkerModeEl = document.getElementById('checkerMode');
+    const intersectionModeEl = document.getElementById('intersectionMode');
+    const centerPerpModeEl = document.getElementById('centerPerpMode');
     const justEdgesEl = document.getElementById('justEdges');
     const justHoughEl = document.getElementById('justHough');
     const detectStatusEl = document.getElementById('detectStatus');
+    const redUpEl = document.getElementById('redUp');
+    const binStatsEl = document.getElementById('binStats');
+    const intersectionStatsEl = document.getElementById('intersectionStats');
     const lineAnglesEl = document.getElementById('lineAngles');
     const lineAvgEl = document.getElementById('lineAvg');
     const houghAvgEl = document.getElementById('houghAvg');
     const barAvgEl = document.getElementById('barAvg');
+    const midBitsEl = document.getElementById('midBits');
     const THRESHOLD_KEY = 'edge_detection_threshold_v1';
+    const SETTINGS_KEY = 'rotation_detection_settings_v3';
 
     const work = document.createElement('canvas');
     const wctx = work.getContext('2d', { willReadFrequently: true });
     let stream = null, raf = null;
     const roi = { x: 0, y: 0, w: 0, h: 0 };
     let edgeSmooth = null, edgeSmoothW = 0, edgeSmoothH = 0;
-    const LINE_COUNT = 10;
+    const LINE_COUNT = 20;
     const LINE_HISTORY_LEN = 5;
     const LINE_OUTLIER_DELTA = 20;
     const LINE_GAUSS_SIGMA_DEG = 12;
@@ -101,6 +134,746 @@
         }
       }
       return out;
+    }
+
+    function buildBinaryBoundary(gray, w, h, thr) {
+      const bin = new Uint8Array(w * h);
+      for (let i = 0; i < gray.length; i++) bin[i] = gray[i] >= thr ? 1 : 0;
+      const out = new Uint8ClampedArray(w * h * 4);
+      const points = [];
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          const b = bin[i];
+          const edge =
+            b !== bin[i + 1] || b !== bin[i - 1] ||
+            b !== bin[i + w] || b !== bin[i - w];
+          const p = i * 4;
+          const v = edge ? 255 : 0;
+          out[p] = v; out[p + 1] = v; out[p + 2] = v; out[p + 3] = 255;
+          if (edge) points.push({ x, y });
+        }
+      }
+      return { edgeRgba: out, points };
+    }
+
+    function sampleRandomPoints(points, n) {
+      if (points.length <= n) return points.slice();
+      const out = [];
+      const used = new Set();
+      while (out.length < n) {
+        const i = (Math.random() * points.length) | 0;
+        if (used.has(i)) continue;
+        used.add(i);
+        out.push(points[i]);
+      }
+      return out;
+    }
+
+    function buildBinaryFromGray(gray, thr) {
+      const b = new Uint8Array(gray.length);
+      for (let i = 0; i < gray.length; i++) b[i] = gray[i] >= thr ? 1 : 0;
+      return b;
+    }
+
+    function binaryBounds(bin, w, h) {
+      const col = new Uint16Array(w);
+      const row = new Uint16Array(h);
+      for (let y = 0; y < h; y++) {
+        const yy = y * w;
+        for (let x = 0; x < w; x++) {
+          if (!bin[yy + x]) continue;
+          col[x]++; row[y]++;
+        }
+      }
+      const minColCount = Math.max(2, Math.floor(h * 0.03));
+      const minRowCount = Math.max(2, Math.floor(w * 0.03));
+      let x0 = 0, x1 = w - 1, y0 = 0, y1 = h - 1;
+      while (x0 < w && col[x0] < minColCount) x0++;
+      while (x1 > x0 && col[x1] < minColCount) x1--;
+      while (y0 < h && row[y0] < minRowCount) y0++;
+      while (y1 > y0 && row[y1] < minRowCount) y1--;
+      if (x1 - x0 < 8 || y1 - y0 < 8) return null;
+      return { x0, x1, y0, y1 };
+    }
+
+    function bitsFromRow(bin, w, y, x0, x1) {
+      const width = Math.max(1, x1 - x0 + 1);
+      let out = '';
+      for (let i = 0; i < width; i++) {
+        const x = x0 + i;
+        if (x < 0 || x >= w) continue;
+        out += bin[y * w + x] ? '1' : '0';
+      }
+      return out;
+    }
+
+    function binaryToRgba(bin, w, h) {
+      const out = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0, p = 0; i < bin.length; i++, p += 4) {
+        const v = bin[i] ? 255 : 0;
+        out[p] = v; out[p + 1] = v; out[p + 2] = v; out[p + 3] = 255;
+      }
+      return out;
+    }
+
+    function redUpInfo(redCentroid, w, h) {
+      if (!redCentroid) return null;
+      const cx = w * 0.5, cy = h * 0.5;
+      const dx = redCentroid.x - cx;
+      const dy = redCentroid.y - cy;
+      let dir = 'up';
+      if (Math.abs(dx) > Math.abs(dy)) dir = dx >= 0 ? 'right' : 'left';
+      else dir = dy >= 0 ? 'down' : 'up';
+      // atan2 uses y-down image coords. Convert so "up" reads as 90 degrees.
+      const raw = normalize360((Math.atan2(dy, dx) * 180) / Math.PI);
+      const up90 = normalize360(raw + 180);
+      return { dir, up90 };
+    }
+
+    function runLengthsOnLine(bin, w, h, cx, cy, angDeg, samples = 220) {
+      const r = (angDeg * Math.PI) / 180;
+      const dx = Math.cos(r), dy = Math.sin(r);
+      const span = Math.hypot(w, h) * 0.5;
+      const step = (span * 2) / samples;
+      let prev = -1, run = 0;
+      const runs = [];
+      for (let i = 0; i <= samples; i++) {
+        const t = -span + i * step;
+        const x = Math.round(cx + dx * t);
+        const y = Math.round(cy + dy * t);
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        const v = bin[y * w + x];
+        if (prev < 0) {
+          prev = v;
+          run = 1;
+        } else if (v === prev) {
+          run++;
+        } else {
+          runs.push(run);
+          prev = v;
+          run = 1;
+        }
+      }
+      if (run > 0) runs.push(run);
+      return runs;
+    }
+
+    function scoreRuns(runs) {
+      if (!runs || runs.length < 8) return -1e9;
+      let sum = 0;
+      for (let i = 0; i < runs.length; i++) sum += runs[i];
+      const mean = sum / runs.length;
+      if (mean < 1.5 || mean > 40) return -1e9;
+      let varSum = 0;
+      for (let i = 0; i < runs.length; i++) {
+        const d = runs[i] - mean;
+        varSum += d * d;
+      }
+      const std = Math.sqrt(varSum / runs.length);
+      const consistency = mean / (std + 1e-3);
+      const transitions = runs.length - 1;
+      return consistency * Math.min(transitions, 80);
+    }
+
+    function estimateCheckerAngle(gray, w, h, thr, redCentroid = null) {
+      const bin = buildBinaryFromGray(gray, thr);
+      const cx = w * 0.5, cy = h * 0.5;
+      const offsets = [-0.22, -0.1, 0, 0.1, 0.22];
+
+      function scoreAngle(ang) {
+        let total = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const rr = ((ang + 90) * Math.PI) / 180;
+          const ox = Math.cos(rr) * offsets[i] * w;
+          const oy = Math.sin(rr) * offsets[i] * h;
+          const runs = runLengthsOnLine(bin, w, h, cx + ox, cy + oy, ang, 220);
+          total += scoreRuns(runs);
+        }
+        return total / offsets.length;
+      }
+
+      let bestAng = 0, bestScore = -1e18;
+      for (let a = 0; a < 180; a += 2) {
+        const s = scoreAngle(a);
+        if (s > bestScore) { bestScore = s; bestAng = a; }
+      }
+      for (let a = bestAng - 3; a <= bestAng + 3; a += 1) {
+        const aa = ((a % 180) + 180) % 180;
+        const s = scoreAngle(aa);
+        if (s > bestScore) { bestScore = s; bestAng = aa; }
+      }
+
+      // Convert axis estimate into full orientation using red marker direction.
+      if (redCentroid) {
+        const redAng = normalize360((Math.atan2(redCentroid.y - cy, redCentroid.x - cx) * 180) / Math.PI);
+        const candidates = [
+          normalize360(bestAng),
+          normalize360(bestAng + 180),
+          normalize360(bestAng - 90),
+          normalize360(bestAng + 90),
+        ];
+        let best = candidates[0], bestD = 1e9;
+        for (let i = 0; i < candidates.length; i++) {
+          const predRed = normalize360(candidates[i] - 90);
+          const d = angleDelta360(predRed, redAng);
+          if (d < bestD) { bestD = d; best = candidates[i]; }
+        }
+        return best;
+      }
+      return normalize360(bestAng);
+    }
+
+    function estimateAngleFromGrid10(gray, w, h, thr, redCentroid = null) {
+      const bin = buildBinaryFromGray(gray, thr);
+      const cx = w * 0.5, cy = h * 0.5;
+      const offs = [];
+      for (let i = 0; i < 10; i++) offs.push(-0.42 + (0.84 * i) / 9); // 10 rows/cols
+
+      function scoreAt(ang) {
+        let sRow = 0, sCol = 0;
+        const nr = ((ang + 90) * Math.PI) / 180;
+        const nx = Math.cos(nr), ny = Math.sin(nr);
+        for (let i = 0; i < offs.length; i++) {
+          const ox = nx * offs[i] * w;
+          const oy = ny * offs[i] * h;
+          const r1 = runLengthsOnLine(bin, w, h, cx + ox, cy + oy, ang, 220);       // rows-like
+          const r2 = runLengthsOnLine(bin, w, h, cx + ox, cy + oy, ang + 90, 220);  // cols-like
+          sRow += scoreRuns(r1);
+          sCol += scoreRuns(r2);
+        }
+        return (sRow + sCol) * 0.5;
+      }
+
+      let bestAng = 0, bestScore = -1e18;
+      for (let a = 0; a < 180; a += 2) {
+        const s = scoreAt(a);
+        if (s > bestScore) { bestScore = s; bestAng = a; }
+      }
+      for (let a = bestAng - 3; a <= bestAng + 3; a += 1) {
+        const aa = ((a % 180) + 180) % 180;
+        const s = scoreAt(aa);
+        if (s > bestScore) { bestScore = s; bestAng = aa; }
+      }
+
+      if (redCentroid) {
+        const redAng = normalize360((Math.atan2(redCentroid.y - cy, redCentroid.x - cx) * 180) / Math.PI);
+        const cands = [
+          normalize360(bestAng),
+          normalize360(bestAng + 180),
+          normalize360(bestAng - 90),
+          normalize360(bestAng + 90),
+        ];
+        let best = cands[0], bestD = 1e9;
+        for (let i = 0; i < cands.length; i++) {
+          const predRed = normalize360(cands[i] - 90);
+          const d = angleDelta360(predRed, redAng);
+          if (d < bestD) { bestD = d; best = cands[i]; }
+        }
+        return best;
+      }
+      return normalize360(bestAng);
+    }
+
+    function drawGrid10Overlay(rx0, ry0, rw, rh) {
+      ctx.save();
+      ctx.lineWidth = 1.2;
+      // 10 evenly spaced horizontal lines.
+      ctx.strokeStyle = 'rgba(255, 210, 60, 0.9)';
+      for (let i = 0; i < 10; i++) {
+        const y = ry0 + ((i + 0.5) * rh) / 10;
+        ctx.beginPath();
+        ctx.moveTo(rx0, y);
+        ctx.lineTo(rx0 + rw, y);
+        ctx.stroke();
+      }
+      // 10 evenly spaced vertical lines.
+      ctx.strokeStyle = 'rgba(80, 190, 255, 0.9)';
+      for (let i = 0; i < 10; i++) {
+        const x = rx0 + ((i + 0.5) * rw) / 10;
+        ctx.beginPath();
+        ctx.moveTo(x, ry0);
+        ctx.lineTo(x, ry0 + rh);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function monteCarloBinaryLines(points, samplePoints, maxLines = 10, redCentroid = null) {
+      if (!points || points.length < 30) return [];
+      const pool = sampleRandomPoints(points, Math.max(40, samplePoints));
+      const attempts = Math.max(120, pool.length * 2);
+      const candidates = [];
+
+      for (let it = 0; it < attempts; it++) {
+        const i = (Math.random() * pool.length) | 0;
+        const j = (Math.random() * pool.length) | 0;
+        if (i === j) continue;
+        const p1 = pool[i], p2 = pool[j];
+        const dx = p2.x - p1.x, dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 10) continue;
+        const ux = dx / len, uy = dy / len;
+        const nx = -uy, ny = ux;
+        let inliers = 0, minT = 1e9, maxT = -1e9;
+        for (let k = 0; k < pool.length; k++) {
+          const q = pool[k];
+          const rx = q.x - p1.x, ry = q.y - p1.y;
+          const dist = Math.abs(rx * nx + ry * ny);
+          if (dist <= 1.8) {
+            inliers++;
+            const t = rx * ux + ry * uy;
+            if (t < minT) minT = t;
+            if (t > maxT) maxT = t;
+          }
+        }
+        const span = maxT - minT;
+        if (inliers < Math.max(10, pool.length * 0.06) || span < 22) continue;
+        const x1 = p1.x + ux * minT, y1 = p1.y + uy * minT;
+        const x2 = p1.x + ux * maxT, y2 = p1.y + uy * maxT;
+        const ang180 = (((Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI) % 180) + 180) % 180;
+        const rho = ((x1 + x2) * 0.5) * nx + ((y1 + y2) * 0.5) * ny;
+        candidates.push({ x1, y1, x2, y2, len: span, score: span + inliers * 0.45, ang180, rho });
+      }
+
+      if (!candidates.length) return [];
+      candidates.sort((a, b) => b.score - a.score);
+      const out = [];
+      for (let i = 0; i < candidates.length && out.length < maxLines; i++) {
+        const c = candidates[i];
+        let ok = true;
+        for (let j = 0; j < out.length; j++) {
+          if (angleDelta180(c.ang180, out[j].ang180) < 6 && Math.abs(c.rho - out[j].rho) < 10) {
+            ok = false; break;
+          }
+        }
+        if (!ok) continue;
+        let { x1, y1, x2, y2 } = c;
+        if (redCentroid) {
+          const d1 = (x1 - redCentroid.x) * (x1 - redCentroid.x) + (y1 - redCentroid.y) * (y1 - redCentroid.y);
+          const d2 = (x2 - redCentroid.x) * (x2 - redCentroid.x) + (y2 - redCentroid.y) * (y2 - redCentroid.y);
+          if (d1 > d2) {
+            const tx = x1, ty = y1;
+            x1 = x2; y1 = y2; x2 = tx; y2 = ty;
+          }
+        }
+        out.push({
+          x1, y1, x2, y2, len: c.len, ang180: c.ang180, rho: c.rho,
+          ang360: normalize360((Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI)
+        });
+      }
+      return out;
+    }
+
+    function detectCheckerIntersections(bin, w, h, maxPts = 300) {
+      function median(arr) {
+        if (!arr.length) return 0;
+        const a = arr.slice().sort((x, y) => x - y);
+        const m = (a.length / 2) | 0;
+        return (a.length & 1) ? a[m] : 0.5 * (a[m - 1] + a[m]);
+      }
+      function angle180(deg) {
+        let a = deg % 180;
+        if (a < 0) a += 180;
+        return a;
+      }
+      function localCheckerScore(x, y, r = 3) {
+        if (x < r + 1 || y < r + 1 || x >= w - r - 1 || y >= h - r - 1) return -1;
+        let q1 = 0, q2 = 0, q3 = 0, q4 = 0, n = 0;
+        for (let oy = -r; oy <= r; oy++) {
+          for (let ox = -r; ox <= r; ox++) {
+            if (ox === 0 || oy === 0) continue;
+            const v = bin[(y + oy) * w + (x + ox)];
+            if (ox > 0 && oy < 0) q1 += v;
+            else if (ox < 0 && oy < 0) q2 += v;
+            else if (ox < 0 && oy > 0) q3 += v;
+            else q4 += v;
+            n++;
+          }
+        }
+        const nq = n / 4;
+        const m1 = q1 / nq, m2 = q2 / nq, m3 = q3 / nq, m4 = q4 / nq;
+        const diagAErr = Math.abs(m1 - m3);
+        const diagBErr = Math.abs(m2 - m4);
+        const adjMin = Math.min(Math.abs(m1 - m2), Math.abs(m1 - m4), Math.abs(m3 - m2), Math.abs(m3 - m4));
+        if (diagAErr > 0.38 || diagBErr > 0.38 || adjMin < 0.2) return -1;
+
+        // 6x6-ish continuation check: center row/col should flip multiple times.
+        let th = 0, tv = 0, ph = -1, pv = -1;
+        for (let t = -r; t <= r; t++) {
+          const vh = bin[y * w + (x + t)];
+          const vv = bin[(y + t) * w + x];
+          if (ph >= 0 && vh !== ph) th++;
+          if (pv >= 0 && vv !== pv) tv++;
+          ph = vh;
+          pv = vv;
+        }
+        if (th < 2 || tv < 2) return -1;
+        return (adjMin * 6) + (2 - diagAErr - diagBErr) + (th + tv) * 0.4;
+      }
+      function estimateAxesAndSpacing(points) {
+        if (points.length < 6) return null;
+        const hist = new Float32Array(180);
+        const nnDist = [];
+        for (let i = 0; i < points.length; i++) {
+          let best = 1e9;
+          const near = [];
+          for (let j = 0; j < points.length; j++) {
+            if (i === j) continue;
+            const dx = points[j].x - points[i].x;
+            const dy = points[j].y - points[i].y;
+            const d = Math.hypot(dx, dy);
+            if (d < 2 || d > Math.min(w, h) * 0.45) continue;
+            near.push({ dx, dy, d });
+            if (d < best) best = d;
+          }
+          if (best < 1e9) nnDist.push(best);
+          near.sort((a, b) => a.d - b.d);
+          for (let k = 0; k < Math.min(6, near.length); k++) {
+            const a = angle180((Math.atan2(near[k].dy, near[k].dx) * 180) / Math.PI);
+            hist[Math.round(a) % 180] += 1 / (near[k].d + 1e-3);
+          }
+        }
+        if (!nnDist.length) return null;
+        let peak = 0, bestV = -1;
+        for (let i = 0; i < 180; i++) {
+          const v = hist[(i + 179) % 180] + hist[i] + hist[(i + 1) % 180];
+          if (v > bestV) { bestV = v; peak = i; }
+        }
+        const theta = (peak * Math.PI) / 180;
+        const dir1 = { x: Math.cos(theta), y: Math.sin(theta) };
+        const dir2 = { x: -dir1.y, y: dir1.x };
+        const d0 = Math.max(4, median(nnDist));
+        return { dir1, dir2, d0 };
+      }
+      function latticeGrow(points, ax) {
+        if (!ax || !points.length) return points;
+        const tol = Math.max(2.5, ax.d0 * 0.45);
+        const dirs = [
+          { x: ax.dir1.x, y: ax.dir1.y },
+          { x: -ax.dir1.x, y: -ax.dir1.y },
+          { x: ax.dir2.x, y: ax.dir2.y },
+          { x: -ax.dir2.x, y: -ax.dir2.y }
+        ];
+        let seed = 0;
+        let bestScore = -1e9;
+        for (let i = 0; i < points.length; i++) {
+          const s = points[i].score || 0;
+          if (s > bestScore) { bestScore = s; seed = i; }
+        }
+        const accepted = [];
+        const inSet = new Uint8Array(points.length);
+        const queue = [seed];
+        inSet[seed] = 1;
+        accepted.push(points[seed]);
+
+        function nearestCandidate(tx, ty) {
+          let bi = -1, bd = tol;
+          for (let i = 0; i < points.length; i++) {
+            if (inSet[i]) continue;
+            const dx = points[i].x - tx;
+            const dy = points[i].y - ty;
+            const d = Math.hypot(dx, dy);
+            if (d < bd) { bd = d; bi = i; }
+          }
+          return bi;
+        }
+
+        while (queue.length && accepted.length < maxPts) {
+          const idx = queue.shift();
+          const p = points[idx];
+          for (let k = 0; k < dirs.length; k++) {
+            const tx = p.x + dirs[k].x * ax.d0;
+            const ty = p.y + dirs[k].y * ax.d0;
+            const ni = nearestCandidate(tx, ty);
+            if (ni < 0) continue;
+            const c = points[ni];
+            if (localCheckerScore(c.x, c.y, 3) < 0) continue;
+            inSet[ni] = 1;
+            accepted.push(c);
+            queue.push(ni);
+            if (accepted.length >= maxPts) break;
+          }
+        }
+        // Fallback: if growth is too sparse, keep strongest validated points.
+        if (accepted.length < Math.min(12, points.length * 0.2)) {
+          const sorted = points.slice().sort((a, b) => (b.score || 0) - (a.score || 0));
+          return sorted.slice(0, Math.min(maxPts, sorted.length));
+        }
+        return accepted;
+      }
+
+      const dirs8 = [
+        [1, 0], [1, 1], [0, 1], [-1, 1],
+        [-1, 0], [-1, -1], [0, -1], [1, -1]
+      ];
+      const boundary = new Uint8Array(w * h);
+      const boundaryIdx = [];
+
+      // Mark boundary pixels where a 0/1 transition exists in 4-neighborhood.
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          const v = bin[i];
+          if (v !== bin[i + 1] || v !== bin[i - 1] || v !== bin[i + w] || v !== bin[i - w]) {
+            boundary[i] = 1;
+            boundaryIdx.push(i);
+          }
+        }
+      }
+      if (!boundaryIdx.length) return [];
+
+      const visited = new Uint8Array(w * h);
+      const turns = [];
+      const maxSeeds = Math.min(320, boundaryIdx.length);
+      const maxTraceSteps = Math.max(300, Math.floor((w + h) * 2.2));
+      const desiredTurns = Math.max(maxPts * 3, 200);
+
+      function bestNext(x, y, prevDx, prevDy) {
+        let bestI = -1;
+        let bestScore = -1e9;
+        for (let k = 0; k < dirs8.length; k++) {
+          const nx = x + dirs8[k][0];
+          const ny = y + dirs8[k][1];
+          if (nx < 1 || ny < 1 || nx >= w - 1 || ny >= h - 1) continue;
+          const ni = ny * w + nx;
+          if (!boundary[ni]) continue;
+          const dx = nx - x;
+          const dy = ny - y;
+          const forward = prevDx === 0 && prevDy === 0 ? 0 : (dx * prevDx + dy * prevDy);
+          const revisitPenalty = visited[ni] ? -3.5 : 0;
+          const score = forward * 2.0 + revisitPenalty;
+          if (score > bestScore) {
+            bestScore = score;
+            bestI = ni;
+          }
+        }
+        return bestI;
+      }
+
+      for (let s = 0; s < maxSeeds && turns.length < desiredTurns; s++) {
+        const seed = boundaryIdx[(Math.random() * boundaryIdx.length) | 0];
+        if (visited[seed]) continue;
+
+        let x = seed % w;
+        let y = (seed / w) | 0;
+        let i = seed;
+        let prevDx = 0;
+        let prevDy = 0;
+        let steps = 0;
+        let localTurns = 0;
+        const startX = x;
+        const startY = y;
+        const recent = [{ x, y }];
+        let prevSlopeDeg = null;
+
+        while (steps < maxTraceSteps && turns.length < desiredTurns) {
+          visited[i] = 1;
+          const ni = bestNext(x, y, prevDx, prevDy);
+          if (ni < 0) break;
+          const nx = ni % w;
+          const ny = (ni / w) | 0;
+          const ndx = nx - x;
+          const ndy = ny - y;
+          recent.push({ x: nx, y: ny });
+          if (recent.length > 4) recent.shift();
+
+          // 4-point local slope (3-step baseline) for a more stable edge direction.
+          let slopeDeg = null;
+          if (recent.length >= 4) {
+            const a = recent[0];
+            const b = recent[recent.length - 1];
+            slopeDeg = normalize360((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI);
+          }
+
+          if ((prevDx !== 0 || prevDy !== 0) && (ndx !== prevDx || ndy !== prevDy)) {
+            const uturn = (ndx === -prevDx && ndy === -prevDy);
+            if (!uturn) {
+              const stepTurn = Math.abs(ndx - prevDx) + Math.abs(ndy - prevDy);
+              let slopeTurn = 0;
+              if (slopeDeg !== null && prevSlopeDeg !== null) {
+                let d = Math.abs(slopeDeg - prevSlopeDeg) % 360;
+                if (d > 180) d = 360 - d;
+                slopeTurn = d / 30; // normalized boost from local slope change
+              }
+              turns.push({
+                x, y,
+                ang: slopeDeg,
+                score: 1 + stepTurn + slopeTurn
+              });
+              localTurns++;
+            }
+          }
+          if (slopeDeg !== null) prevSlopeDeg = slopeDeg;
+
+          x = nx;
+          y = ny;
+          i = ni;
+          prevDx = ndx;
+          prevDy = ndy;
+          steps++;
+
+          if (steps > 24 && Math.hypot(x - startX, y - startY) < 2 && localTurns > 1) break;
+        }
+      }
+
+      if (!turns.length) return [];
+
+      // Non-max suppression so we keep distinct corner/intersection points.
+      turns.sort((a, b) => b.score - a.score);
+      const out = [];
+      const taken = new Uint8Array(w * h);
+      const r = 4;
+      for (let i = 0; i < turns.length && out.length < maxPts; i++) {
+        const c = turns[i];
+        const ci = c.y * w + c.x;
+        if (taken[ci]) continue;
+        out.push(c);
+        for (let oy = -r; oy <= r; oy++) {
+          const yy = c.y + oy;
+          if (yy < 0 || yy >= h) continue;
+          for (let ox = -r; ox <= r; ox++) {
+            const xx = c.x + ox;
+            if (xx < 0 || xx >= w) continue;
+            taken[yy * w + xx] = 1;
+          }
+        }
+      }
+
+      // Keep points that look like true checker intersections in a 6x6/7x7 local window.
+      const validated = [];
+      for (let i = 0; i < out.length; i++) {
+        const p = out[i];
+        const ls = localCheckerScore(p.x, p.y, 3);
+        if (ls < 0) continue;
+        validated.push({ x: p.x, y: p.y, score: (p.score || 0) + ls, ang: p.ang });
+      }
+      if (validated.length < 6) return validated.length ? validated : out;
+
+      // Estimate intersection spacing/directions, then grow in +parallel, -parallel, and both perpendicular directions.
+      const axes = estimateAxesAndSpacing(validated);
+      return latticeGrow(validated, axes);
+    }
+
+    function estimateAngleFromIntersections(points, w, h, redCentroid = null) {
+      if (!points || points.length < 8) return null;
+      const angs = [];
+      const ws = [];
+      for (let i = 0; i < points.length; i++) {
+        const near = [];
+        for (let j = 0; j < points.length; j++) {
+          if (i === j) continue;
+          const dx = points[j].x - points[i].x;
+          const dy = points[j].y - points[i].y;
+          const d = Math.hypot(dx, dy);
+          if (d < 6 || d > Math.min(w, h) * 0.35) continue;
+          near.push({ dx, dy, d });
+        }
+        near.sort((a, b) => a.d - b.d);
+        for (let k = 0; k < Math.min(4, near.length); k++) {
+          const n = near[k];
+          angs.push((((Math.atan2(n.dy, n.dx) * 180 / Math.PI) % 180) + 180) % 180);
+          ws.push(1 / (n.d + 1e-3));
+        }
+      }
+      if (angs.length < 6) return null;
+      const hist = new Float32Array(180);
+      for (let i = 0; i < angs.length; i++) hist[Math.round(angs[i]) % 180] += ws[i];
+      let peak = 0, best = -1;
+      for (let i = 0; i < 180; i++) {
+        const v = hist[(i - 1 + 180) % 180] + hist[i] + hist[(i + 1) % 180];
+        if (v > best) { best = v; peak = i; }
+      }
+      const base = normalize360(peak);
+      if (!redCentroid) return base;
+
+      const cx = w * 0.5, cy = h * 0.5;
+      const redAng = normalize360((Math.atan2(redCentroid.y - cy, redCentroid.x - cx) * 180) / Math.PI);
+      const cands = [base, normalize360(base + 180), normalize360(base + 90), normalize360(base - 90)];
+      let out = cands[0], bestD = 1e9;
+      for (let i = 0; i < cands.length; i++) {
+        const predRed = normalize360(cands[i] - 90);
+        const d = angleDelta360(predRed, redAng);
+        if (d < bestD) { bestD = d; out = cands[i]; }
+      }
+      return out;
+    }
+
+    function angleFromCenterPerp(bin, w, h, redCentroid = null) {
+      const boundary = new Uint8Array(w * h);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = y * w + x;
+          const v = bin[i];
+          if (v !== bin[i + 1] || v !== bin[i - 1] || v !== bin[i + w] || v !== bin[i - w]) boundary[i] = 1;
+        }
+      }
+      const segments = [];
+      const angs180 = [];
+      const ws = [];
+      const r = 8;
+      const stride = 3;
+      for (let y = r + 1; y < h - r - 1; y += stride) {
+        for (let x = r + 1; x < w - r - 1; x += stride) {
+          if (!boundary[y * w + x]) continue;
+          const pts = [];
+          for (let yy = y - r; yy <= y + r; yy++) {
+            for (let xx = x - r; xx <= x + r; xx++) {
+              if (!boundary[yy * w + xx]) continue;
+              const dx = xx - x;
+              const dy = yy - y;
+              if (dx * dx + dy * dy <= r * r) pts.push({ x: xx, y: yy });
+            }
+          }
+          if (pts.length < 8) continue;
+          let mx = 0, my = 0;
+          for (let i = 0; i < pts.length; i++) { mx += pts[i].x; my += pts[i].y; }
+          mx /= pts.length; my /= pts.length;
+          let sxx = 0, syy = 0, sxy = 0;
+          for (let i = 0; i < pts.length; i++) {
+            const dx = pts[i].x - mx;
+            const dy = pts[i].y - my;
+            sxx += dx * dx;
+            syy += dy * dy;
+            sxy += dx * dy;
+          }
+          const tr = sxx + syy;
+          const disc = Math.max(0, (sxx - syy) * (sxx - syy) + 4 * sxy * sxy);
+          const lambda1 = 0.5 * (tr + Math.sqrt(disc));
+          const lambda2 = 0.5 * (tr - Math.sqrt(disc));
+          const confidence = lambda1 > 1e-6 ? (lambda1 - lambda2) / lambda1 : 0;
+          if (confidence < 0.22) continue;
+          const borderAng = ((Math.atan2(2 * sxy, sxx - syy) * 180 / Math.PI) * 0.5 + 180) % 180;
+          const wt = Math.max(0.01, confidence * Math.sqrt(pts.length));
+          angs180.push(borderAng);
+          ws.push(wt);
+          if (segments.length < 80) {
+            const len = 11 + Math.min(18, Math.sqrt(lambda1) * 0.9);
+            const rad = borderAng * Math.PI / 180;
+            const ux = Math.cos(rad), uy = Math.sin(rad);
+            segments.push({ x1: mx - ux * len, y1: my - uy * len, x2: mx + ux * len, y2: my + uy * len });
+          }
+        }
+      }
+
+      if (!angs180.length) return { angle: null, segments };
+      const hist = new Float32Array(180);
+      for (let i = 0; i < angs180.length; i++) hist[Math.round(angs180[i]) % 180] += ws[i];
+      let peak = 0, best = -1;
+      for (let i = 0; i < 180; i++) {
+        const v = hist[(i + 179) % 180] + hist[i] + hist[(i + 1) % 180];
+        if (v > best) { best = v; peak = i; }
+      }
+      let perpRaw = normalize360(peak - 90);
+      if (redCentroid) {
+        const cx = w * 0.5, cy = h * 0.5;
+        const redAng = normalize360((Math.atan2(redCentroid.y - cy, redCentroid.x - cx) * 180) / Math.PI);
+        const cands = [perpRaw, normalize360(perpRaw + 180)];
+        const pred0 = normalize360(cands[0] - 90);
+        const pred1 = normalize360(cands[1] - 90);
+        perpRaw = angleDelta360(pred0, redAng) <= angleDelta360(pred1, redAng) ? cands[0] : cands[1];
+      }
+      return { angle: perpRaw, segments };
     }
 
     function temporalSmoothEdges(edgeRgba, w, h, alpha = 0.35, onThresh = 140) {
@@ -579,16 +1352,38 @@
             gray[y * rw + x] = (d[p] * 30 + d[p + 1] * 59 + d[p + 2] * 11) / 100;
           }
         }
-        const blurred = gaussianBlurGray(gray, rw, rh);
-        const edgeRgba = sobelEdges(blurred, rw, rh, parseInt(thrEl.value, 10));
-        temporalSmoothEdges(edgeRgba, rw, rh);
+        const thr = parseInt(thrEl.value, 10);
+        const bin = buildBinaryFromGray(gray, thr);
+        const midY = Math.floor(rh * 0.5);
+        const midBits = bitsFromRow(bin, rw, midY, 0, rw - 1);
+        midBitsEl.textContent = `mid row bits: ${midBits}`;
+        const binaryRgba = binaryToRgba(bin, rw, rh);
+        let ones = 0;
+        for (let i = 0; i < bin.length; i++) ones += bin[i];
+        const zeros = bin.length - ones;
+        binStatsEl.textContent = `Binary: 1s=${ones} 0s=${zeros}`;
+        let edgeRgba;
         let edgeCount = 0;
-        for (let i = 0; i < edgeRgba.length; i += 4) if (edgeRgba[i] > 0) edgeCount++;
+        let mcLines = [];
+        if (mcModeEl.checked || checkerModeEl.checked || intersectionModeEl.checked || centerPerpModeEl.checked) {
+          const bb = buildBinaryBoundary(gray, rw, rh, thr);
+          edgeRgba = bb.edgeRgba;
+          edgeCount = bb.points.length;
+        } else {
+          const blurred = gaussianBlurGray(gray, rw, rh);
+          edgeRgba = sobelEdges(blurred, rw, rh, thr);
+          temporalSmoothEdges(edgeRgba, rw, rh);
+          for (let i = 0; i < edgeRgba.length; i += 4) if (edgeRgba[i] > 0) edgeCount++;
+        }
         detectStatusEl.textContent = edgeCount > 0 ? `Status: edges detected (${edgeCount})` : 'Status: no edges detected';
         const redCentroid = detectRedCentroid(d, work.width, rx0, ry0, rw, rh);
+        const upInfo = redUpInfo(redCentroid, rw, rh);
+        redUpEl.textContent = upInfo ? `Red Up: ${upInfo.dir} (${upInfo.up90.toFixed(1)}°)` : 'Red Up: -';
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, cv.width, cv.height);
-        ctx.putImageData(new ImageData(edgeRgba, rw, rh), rx0, ry0);
+        // In checker mode, show pure thresholded 0/1 image for verification.
+        const viewRgba = (checkerModeEl.checked || intersectionModeEl.checked || centerPerpModeEl.checked) ? binaryRgba : edgeRgba;
+        ctx.putImageData(new ImageData(viewRgba, rw, rh), rx0, ry0);
         if (justEdgesEl.checked) {
           for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
           houghHistory.length = 0;
@@ -596,6 +1391,106 @@
           lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
           houghAvgEl.textContent = 'Angle: -';
           barAvgEl.textContent = 'Bars(10) Avg: -';
+          intersectionStatsEl.textContent = 'Intersections: -';
+          drawRoiOverlay();
+          return;
+        }
+        if (intersectionModeEl.checked) {
+          const targetPts = Math.max(20, parseInt(intersectionTargetEl.value, 10) || 300);
+          const pts = detectCheckerIntersections(bin, rw, rh, targetPts);
+          intersectionStatsEl.textContent = `Intersections: ${pts.length}`;
+          const ia = estimateAngleFromIntersections(pts, rw, rh, redCentroid);
+          houghAvgEl.textContent = ia === null ? 'Angle: -' : `Angle: ${displayAngle(ia).toFixed(1)}°`;
+          lineAnglesEl.textContent = ia === null ? 'Angles: -' : `Angles: intersections=${displayAngle(ia).toFixed(1)}°`;
+          lineAvgEl.textContent = ia === null ? 'Intersection Avg: -' : `Intersection Avg: ${displayAngle(ia).toFixed(1)}°`;
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          ctx.save();
+          ctx.fillStyle = 'rgba(255,40,40,0.95)';
+          for (let i = 0; i < pts.length; i++) ctx.fillRect(rx0 + pts[i].x - 2, ry0 + pts[i].y - 2, 5, 5);
+          ctx.restore();
+          drawRoiOverlay();
+          return;
+        }
+        if (centerPerpModeEl.checked) {
+          const res = angleFromCenterPerp(bin, rw, rh, redCentroid);
+          houghAvgEl.textContent = res.angle === null ? 'Angle: -' : `Angle: ${displayAngle(res.angle).toFixed(1)}°`;
+          lineAnglesEl.textContent = res.angle === null ? 'Angles: -' : `Angles: center-perp=${displayAngle(res.angle).toFixed(1)}°`;
+          lineAvgEl.textContent = res.angle === null ? 'Center-Perp Avg: -' : `Center-Perp Avg: ${displayAngle(res.angle).toFixed(1)}°`;
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          intersectionStatsEl.textContent = `Intersections: ${res.segments.length}`;
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,60,60,0.98)';
+          ctx.lineWidth = 2.4;
+          for (let i = 0; i < res.segments.length; i++) {
+            const s = res.segments[i];
+            ctx.beginPath();
+            ctx.moveTo(rx0 + s.x1, ry0 + s.y1);
+            ctx.lineTo(rx0 + s.x2, ry0 + s.y2);
+            ctx.stroke();
+          }
+          // show the center column guide
+          ctx.strokeStyle = 'rgba(80,220,255,0.9)';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(rx0 + ((rw * 0.5) | 0), ry0);
+          ctx.lineTo(rx0 + ((rw * 0.5) | 0), ry0 + rh);
+          ctx.stroke();
+          ctx.restore();
+          drawRoiOverlay();
+          return;
+        }
+        if (checkerModeEl.checked) {
+          const checkerRaw = estimateAngleFromGrid10(gray, rw, rh, thr, redCentroid);
+          houghAvgEl.textContent = checkerRaw === null ? 'Angle: -' : `Angle: ${displayAngle(checkerRaw).toFixed(1)}°`;
+          lineAnglesEl.textContent = checkerRaw === null ? 'Angles: -' : `Angles: grid10=${displayAngle(checkerRaw).toFixed(1)}°`;
+          lineAvgEl.textContent = checkerRaw === null ? 'Grid(10x10) Avg: -' : `Grid(10x10) Avg: ${displayAngle(checkerRaw).toFixed(1)}°`;
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          intersectionStatsEl.textContent = 'Intersections: -';
+          drawGrid10Overlay(rx0, ry0, rw, rh);
+          drawRoiOverlay();
+          return;
+        }
+        if (mcModeEl.checked) {
+          const bb = buildBinaryBoundary(gray, rw, rh, thr);
+          mcLines = monteCarloBinaryLines(
+            bb.points,
+            Math.max(100, parseInt(mcPointsEl.value, 10) || 1200),
+            LINE_COUNT,
+            redCentroid
+          );
+          if (mcLines.length) {
+            const colors = ['#ff5555', '#55ff55', '#5599ff', '#ffd84d', '#ff7dff'];
+            const angleTexts = [];
+            const angles = [];
+            const lens = [];
+            ctx.save();
+            ctx.lineWidth = 2.2;
+            for (let i = 0; i < mcLines.length; i++) {
+              const ln = mcLines[i];
+              angles.push(ln.ang360);
+              lens.push(ln.len);
+              angleTexts.push(`${i + 1}:${displayAngle(ln.ang360).toFixed(1)}°`);
+              ctx.strokeStyle = colors[i % colors.length];
+              ctx.beginPath();
+              ctx.moveTo(rx0 + ln.x1, ry0 + ln.y1);
+              ctx.lineTo(rx0 + ln.x2, ry0 + ln.y2);
+              ctx.stroke();
+              ctx.fillStyle = '#ff2a2a';
+              ctx.fillRect(rx0 + ln.x2 - 3, ry0 + ln.y2 - 3, 6, 6);
+            }
+            ctx.restore();
+            const preview = angleTexts.slice(0, 10).join('  ');
+            lineAnglesEl.textContent = angleTexts.length > 10 ? `Angles: ${preview} ...` : `Angles: ${preview}`;
+            const mcAvg = gaussianWeightedAverageAngles360(angles, lens, LINE_GAUSS_SIGMA_DEG);
+            lineAvgEl.textContent = `MC Lines(${mcLines.length}) Gaussian Avg: ${displayAngle(mcAvg).toFixed(1)}°`;
+            houghAvgEl.textContent = `Angle: ${displayAngle(mcAvg).toFixed(1)}°`;
+          } else {
+            lineAnglesEl.textContent = 'Angles: -';
+            lineAvgEl.textContent = `MC Lines(${LINE_COUNT}) Gaussian Avg: -`;
+            houghAvgEl.textContent = 'Angle: -';
+          }
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          intersectionStatsEl.textContent = 'Intersections: -';
           drawRoiOverlay();
           return;
         }
@@ -608,6 +1503,7 @@
           barAvgEl.textContent = 'Bars(10) Avg: -';
           const houghAvg = smoothHough(houghRawFrame);
           houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+          intersectionStatsEl.textContent = 'Intersections: -';
           drawRoiOverlay();
           return;
         }
@@ -690,6 +1586,7 @@
         }
         const houghAvg = smoothHough(houghRawFrame);
         houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+        intersectionStatsEl.textContent = 'Intersections: -';
         if (usedHoughFallbackForLines) {
           lineAvgEl.textContent = houghAvg === null
             ? `Lines(${LINE_COUNT}) Gaussian Avg: -`
@@ -729,12 +1626,17 @@
       lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
       houghAvgEl.textContent = 'Angle: -';
       barAvgEl.textContent = 'Bars(10) Avg: -';
+      midBitsEl.textContent = 'mid row bits: -';
+      redUpEl.textContent = 'Red Up: -';
+      binStatsEl.textContent = 'Binary: -';
+      intersectionStatsEl.textContent = 'Intersections: -';
       ctx.fillStyle = '#111';
       ctx.fillRect(0, 0, cv.width, cv.height);
     }
 
     thrEl.oninput = () => {
       try { localStorage.setItem(THRESHOLD_KEY, thrEl.value); } catch (e) {}
+      persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
         process();
@@ -742,6 +1644,55 @@
     };
     houghWindowEl.oninput = () => {
       houghWindowValEl.textContent = houghWindowEl.value;
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    mcPointsEl.oninput = () => {
+      mcPointsValEl.textContent = mcPointsEl.value;
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    intersectionTargetEl.oninput = () => {
+      intersectionTargetValEl.textContent = intersectionTargetEl.value;
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    mcModeEl.onchange = () => {
+      if (mcModeEl.checked) { justHoughEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    checkerModeEl.onchange = () => {
+      if (checkerModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    intersectionModeEl.onchange = () => {
+      if (intersectionModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; centerPerpModeEl.checked = false; }
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    centerPerpModeEl.onchange = () => {
+      if (centerPerpModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; }
+      persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
         process();
@@ -749,13 +1700,15 @@
     };
     justEdgesEl.onchange = () => {
       if (justEdgesEl.checked) justHoughEl.checked = false;
+      persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
         process();
       }
     };
     justHoughEl.onchange = () => {
-      if (justHoughEl.checked) justEdgesEl.checked = false;
+      if (justHoughEl.checked) { justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
         process();
@@ -765,7 +1718,60 @@
       const saved = localStorage.getItem(THRESHOLD_KEY);
       if (saved !== null && saved !== '') thrEl.value = saved;
     } catch (e) {}
+    function persistSettings() {
+      const s = {
+        houghWindow: houghWindowEl.value,
+        mcPoints: mcPointsEl.value,
+        intersectionTarget: intersectionTargetEl.value,
+        justEdges: justEdgesEl.checked,
+        justHough: justHoughEl.checked,
+        mcMode: mcModeEl.checked,
+        checkerMode: checkerModeEl.checked,
+        intersectionMode: intersectionModeEl.checked,
+        centerPerpMode: centerPerpModeEl.checked
+      };
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+    }
+
+    function restoreSettings() {
+      try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if (!raw) return;
+        const s = JSON.parse(raw);
+        if (s.houghWindow != null) houghWindowEl.value = String(s.houghWindow);
+        if (s.mcPoints != null) mcPointsEl.value = String(s.mcPoints);
+        if (s.intersectionTarget != null) intersectionTargetEl.value = String(s.intersectionTarget);
+        justEdgesEl.checked = !!s.justEdges;
+        justHoughEl.checked = !!s.justHough;
+        mcModeEl.checked = !!s.mcMode;
+        checkerModeEl.checked = !!s.checkerMode;
+        intersectionModeEl.checked = !!s.intersectionMode;
+        centerPerpModeEl.checked = !!s.centerPerpMode;
+
+        // enforce mutual exclusivity (priority order)
+        if (justHoughEl.checked) {
+          justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false;
+        } else {
+          const active = [mcModeEl.checked, checkerModeEl.checked, intersectionModeEl.checked, centerPerpModeEl.checked].filter(Boolean).length;
+          if (active > 1) {
+            // keep first checked in precedence: checker, center-perp, intersection, monte carlo
+            const keepChecker = checkerModeEl.checked;
+            const keepCenterPerp = !keepChecker && centerPerpModeEl.checked;
+            const keepIntersection = !keepChecker && !keepCenterPerp && intersectionModeEl.checked;
+            const keepMc = !keepChecker && !keepCenterPerp && !keepIntersection && mcModeEl.checked;
+            checkerModeEl.checked = keepChecker;
+            centerPerpModeEl.checked = keepCenterPerp;
+            intersectionModeEl.checked = keepIntersection;
+            mcModeEl.checked = keepMc;
+          }
+        }
+      } catch (e) {}
+    }
+
+    restoreSettings();
     houghWindowValEl.textContent = houghWindowEl.value;
+    mcPointsValEl.textContent = mcPointsEl.value;
+    intersectionTargetValEl.textContent = intersectionTargetEl.value;
     collapseBtn.onclick = () => {
       const expanded = advancedControls.style.display !== 'none';
       advancedControls.style.display = expanded ? 'none' : 'flex';

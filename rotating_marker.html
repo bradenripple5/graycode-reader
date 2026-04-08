@@ -10,6 +10,21 @@
     .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
     canvas { width: 100%; background: #ddd; border-radius: 6px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pill-btn {
+      border: 1px solid #6c6c6c;
+      background: #efefef;
+      color: #222;
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .pill-btn.active {
+      background: #d8f7dc;
+      border-color: #2d9b3e;
+      color: #126320;
+      font-weight: 700;
+    }
     .qr-link {
       display: inline-flex;
       align-items: center;
@@ -46,13 +61,13 @@
 </head>
 <body>
   <div class="panel">
-    <h2>Rotating Vertical Bars (Red Top Caps)</h2>
+    <h2>Rotating Checkerboard (Red Top Cells)</h2>
     <div class="row">
-      <label>Rotation: <span id="angleOut" class="mono">0.0°</span></label>
+      <label>Rotation: <span id="angleOut" class="mono">90.0°</span></label>
       <input id="angle" type="range" min="0" max="360" step="0.1" value="0" style="flex:1; min-width:260px;" />
-      <label><input id="auto" type="checkbox" /> Auto rotate</label>
-      <label>Speed: <span id="speedOut" class="mono">0</span>°/s</label>
-      <input id="speed" type="range" min="0" max="45" step="1" value="0" />
+      <button id="spinBtn" class="pill-btn" type="button" aria-pressed="false">Spin: Off</button>
+      <label>Speed: <span id="speedOut" class="mono">3</span>°/s</label>
+      <input id="speed" type="range" min="0" max="45" step="1" value="3" />
       <a class="qr-link" href="./rotation_detection_edge.html" title="Open camera view">
         <img id="navQr" alt="QR code to open camera view" />
         <span>Click on this QR code to open camera view to detect angle of lines</span>
@@ -67,7 +82,7 @@
     const ctx = cv.getContext('2d');
     const angleEl = document.getElementById('angle');
     const angleOut = document.getElementById('angleOut');
-    const autoEl = document.getElementById('auto');
+    const spinBtn = document.getElementById('spinBtn');
     const speedEl = document.getElementById('speed');
     const speedOut = document.getElementById('speedOut');
     const navQr = document.getElementById('navQr');
@@ -77,10 +92,85 @@
 
     let angle = 0;
     let last = performance.now();
+    let autoRotate = false;
 
-    function setRealQr() {
+    function normalize360(a) {
+      let v = a % 360;
+      if (v < 0) v += 360;
+      return v;
+    }
+
+    function displayAngle(a) {
+      return normalize360(a + 90);
+    }
+
+    function normalizeLanHost(raw) {
+      if (!raw) return '';
+      const v = String(raw).trim();
+      if (!v) return '';
+      try {
+        if (v.startsWith('http://') || v.startsWith('https://')) return new URL(v).host;
+      } catch (e) {}
+      return v.replace(/\/+$/, '');
+    }
+
+    async function detectLanIpViaWebRTC(timeoutMs = 1200) {
+      if (!window.RTCPeerConnection) return null;
+      return new Promise((resolve) => {
+        let done = false;
+        let pc = null;
+        const finish = (val) => {
+          if (done) return;
+          done = true;
+          try { if (pc) pc.close(); } catch (e) {}
+          resolve(val || null);
+        };
+        try {
+          pc = new RTCPeerConnection({ iceServers: [] });
+          pc.createDataChannel('lan-ip');
+          pc.onicecandidate = (e) => {
+            const c = e && e.candidate && e.candidate.candidate;
+            if (!c) return;
+            const m = c.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (!m) return;
+            const ip = m[1];
+            if (isPrivateIp(ip)) finish(ip);
+          };
+          pc.createOffer()
+            .then((offer) => pc.setLocalDescription(offer))
+            .catch(() => finish(null));
+          setTimeout(() => finish(null), timeoutMs);
+        } catch (err) {
+          finish(null);
+        }
+      });
+    }
+
+    async function setRealQr() {
       const edgeUrl = new URL('./rotation_detection_edge.html', window.location.href);
-      const targetUrl = edgeUrl.href;
+      const GH_URL = 'https://bradenripple5.github.io/graycode-reader/rotation_detection_edge.html';
+      const params = new URLSearchParams(window.location.search);
+      const lanOverride = normalizeLanHost(params.get('lan') || localStorage.getItem('qr_lan_host') || '');
+      if (params.get('lan')) {
+        try { localStorage.setItem('qr_lan_host', lanOverride); } catch (e) {}
+      }
+
+      let targetUrl = edgeUrl.href;
+      if (edgeUrl.hostname.endsWith('github.io')) {
+        targetUrl = GH_URL;
+      } else if (isLikelyLocalHost(edgeUrl.hostname)) {
+        if (lanOverride) {
+          const proto = edgeUrl.protocol || 'http:';
+          targetUrl = `${proto}//${lanOverride}${edgeUrl.pathname}`;
+        } else {
+          const proto = edgeUrl.protocol || 'http:';
+          const port = edgeUrl.port ? `:${edgeUrl.port}` : '';
+          const lanIp = await detectLanIpViaWebRTC();
+          if (lanIp) targetUrl = `${proto}//${lanIp}${port}${edgeUrl.pathname}`;
+          else targetUrl = GH_URL;
+        }
+      }
+
       const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&qzone=4&data=${encodeURIComponent(targetUrl)}`;
       navQr.src = qrSrc;
       navQr.title = targetUrl;
@@ -113,27 +203,29 @@
 
       const cx = cv.width / 2;
       const cy = cv.height / 2;
-      const s = 220;
-      const bars = 10;
+      const s = 240;
+      const cells = 8;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate((deg * Math.PI) / 180);
 
-      // 10 vertical white bars on black background.
-      const margin = 16;
-      const innerW = s - margin * 2;
-      const innerH = s - margin * 2;
-      const barW = innerW / bars;
-      for (let i = 0; i < bars; i++) {
-        ctx.fillStyle = '#fff';
-        const x = -s / 2 + margin + i * barW + barW * 0.12;
-        ctx.fillRect(x, -s / 2 + margin, barW * 0.76, innerH);
-
-        // Red cap marks the same end of every bar ("top" reference).
-        ctx.fillStyle = '#ff2a2a';
-        ctx.fillRect(x, -s / 2 + margin, barW * 0.76, Math.max(6, innerH * 0.12));
+      const cell = s / cells;
+      for (let r = 0; r < cells; r++) {
+        for (let c = 0; c < cells; c++) {
+          const x = -s / 2 + c * cell;
+          const y = -s / 2 + r * cell;
+          const isBlack = ((r + c) & 1) === 1;
+          // Top-row black cells are red to provide unique orientation.
+          if (r === 0 && isBlack) ctx.fillStyle = '#ff2a2a';
+          else ctx.fillStyle = isBlack ? '#000' : '#fff';
+          ctx.fillRect(x, y, cell + 0.2, cell + 0.2);
+        }
       }
+
+      ctx.strokeStyle = '#808080';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-s / 2, -s / 2, s, s);
 
       ctx.restore();
 
@@ -150,19 +242,26 @@
       last = ts;
       const speed = parseFloat(speedEl.value) || 0;
       speedOut.textContent = String(Math.round(speed));
-      if (autoEl.checked) {
+      if (autoRotate) {
         angle = (angle + dt * speed) % 360;
         angleEl.value = angle.toFixed(1);
       } else {
         angle = parseFloat(angleEl.value) || 0;
       }
-      angleOut.textContent = `${angle.toFixed(1)}°`;
+      angleOut.textContent = `${displayAngle(angle).toFixed(1)}°`;
       drawMarker(angle);
       requestAnimationFrame(tick);
     }
 
     angleEl.addEventListener('input', () => {
-      if (!autoEl.checked) angle = parseFloat(angleEl.value) || 0;
+      if (!autoRotate) angle = parseFloat(angleEl.value) || 0;
+    });
+
+    spinBtn.addEventListener('click', () => {
+      autoRotate = !autoRotate;
+      spinBtn.classList.toggle('active', autoRotate);
+      spinBtn.setAttribute('aria-pressed', autoRotate ? 'true' : 'false');
+      spinBtn.textContent = autoRotate ? 'Spin: On' : 'Spin: Off';
     });
 
     speedEl.addEventListener('input', () => {
