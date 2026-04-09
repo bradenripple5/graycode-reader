@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rotating Marker</title>
+  <title>Rotating Match Stick</title>
   <style>
     body { font-family: sans-serif; margin: 20px; background: #f3f3f3; }
-    .panel { max-width: 760px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
+    .panel { position: relative; max-width: 760px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
     .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
     canvas { width: 100%; background: #ddd; border-radius: 6px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -57,22 +57,49 @@
       display: none;
       word-break: break-all;
     }
+    .viewer-note {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #fff0f0;
+      border: 1px solid #e3aaaa;
+      color: #7a2020;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .menu-link {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      font-size: 13px;
+    }
+    .menu-link a {
+      color: #1f4db8;
+      text-decoration: none;
+    }
+    .menu-link a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   <div class="panel">
-    <h2>Rotating Checkerboard (Red Top Cells)</h2>
+    <div class="menu-link"><a href="./pages_index.html">Main Menu</a></div>
+    <h2>Rotating Match Stick (Red Tip)</h2>
     <div class="row">
-      <label>Rotation: <span id="angleOut" class="mono">90.0°</span></label>
-      <input id="angle" type="range" min="0" max="360" step="0.1" value="0" style="flex:1; min-width:260px;" />
-      <button id="spinBtn" class="pill-btn" type="button" aria-pressed="false">Spin: Off</button>
-      <label>Speed: <span id="speedOut" class="mono">3</span>°/s</label>
-      <input id="speed" type="range" min="0" max="45" step="1" value="3" />
+      <label>Rotation: <span id="angleOut" class="mono">131.4°</span></label>
+      <input id="angle" type="range" min="0" max="360" step="0.1" value="131.4" style="flex:1; min-width:260px;" />
+      <button id="spinBtn" class="pill-btn active" type="button" aria-pressed="true">Spin: On</button>
+      <label>Speed: <span id="speedOut" class="mono">21</span>°/s</label>
+      <input id="speed" type="range" min="0" max="45" step="1" value="21" />
+      <label>Stick Length: <span id="lengthOut" class="mono">66</span>%</label>
+      <input id="length" type="range" min="20" max="95" step="1" value="66" />
+      <label>Thickness: <span id="thicknessOut" class="mono">16</span>px</label>
+      <input id="thickness" type="range" min="2" max="24" step="1" value="16" />
       <a class="qr-link" href="./rotation_detection_edge.html" title="Open camera view">
         <img id="navQr" alt="QR code to open camera view" />
-        <span>Click on this QR code to open camera view to detect angle of lines</span>
+        <span>Click on this QR code to open camera view to detect angle of match stick</span>
       </a>
     </div>
+    <div class="viewer-note">Make sure that only the match stick is visible in the camera viewer.</div>
     <div id="qrNotice" class="notice"></div>
     <canvas id="cv" width="720" height="480"></canvas>
   </div>
@@ -85,14 +112,17 @@
     const spinBtn = document.getElementById('spinBtn');
     const speedEl = document.getElementById('speed');
     const speedOut = document.getElementById('speedOut');
+    const lengthEl = document.getElementById('length');
+    const lengthOut = document.getElementById('lengthOut');
+    const thicknessEl = document.getElementById('thickness');
+    const thicknessOut = document.getElementById('thicknessOut');
     const navQr = document.getElementById('navQr');
     const qrLink = document.querySelector('.qr-link');
     const qrNotice = document.getElementById('qrNotice');
-    const SPEED_KEY = 'rotating_marker_speed_v1';
 
     let angle = 0;
     let last = performance.now();
-    let autoRotate = false;
+    let autoRotate = true;
 
     function normalize360(a) {
       let v = a % 360;
@@ -101,7 +131,12 @@
     }
 
     function displayAngle(a) {
-      return normalize360(a + 90);
+      // Convert image-space clockwise angle to conventional counterclockwise angle.
+      return normalize360(360 - a);
+    }
+
+    function ccwToImageAngle(a) {
+      return normalize360(360 - a);
     }
 
     function normalizeLanHost(raw) {
@@ -196,6 +231,14 @@
       showQrNotice._t = setTimeout(() => { qrNotice.style.display = 'none'; }, 7000);
     }
 
+    function currentStickParams() {
+      const lengthPct = Math.max(20, Math.min(95, parseFloat(lengthEl.value) || 66));
+      const lineWidth = Math.max(2, Math.min(24, parseFloat(thicknessEl.value) || 8));
+      const halfLen = Math.min(cv.width, cv.height) * 0.5 * (lengthPct / 100);
+      const tipRadius = lineWidth * 0.9;
+      return { lengthPct, lineWidth, halfLen, tipRadius };
+    }
+
     function drawMarker(deg) {
       ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.fillStyle = '#000';
@@ -203,50 +246,45 @@
 
       const cx = cv.width / 2;
       const cy = cv.height / 2;
-      const s = 240;
-      const cells = 8;
+      const p = currentStickParams();
+      const halfLen = p.halfLen;
+      const lineWidth = p.lineWidth;
+      const tipRadius = p.tipRadius;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate((deg * Math.PI) / 180);
+      ctx.strokeStyle = '#fff';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(-halfLen, 0);
+      ctx.lineTo(halfLen, 0);
+      ctx.stroke();
 
-      const cell = s / cells;
-      for (let r = 0; r < cells; r++) {
-        for (let c = 0; c < cells; c++) {
-          const x = -s / 2 + c * cell;
-          const y = -s / 2 + r * cell;
-          const isBlack = ((r + c) & 1) === 1;
-          // Top-row black cells are red to provide unique orientation.
-          if (r === 0 && isBlack) ctx.fillStyle = '#ff2a2a';
-          else ctx.fillStyle = isBlack ? '#000' : '#fff';
-          ctx.fillRect(x, y, cell + 0.2, cell + 0.2);
-        }
-      }
-
-      ctx.strokeStyle = '#808080';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-s / 2, -s / 2, s, s);
+      // Red tip on the +X end gives direction.
+      ctx.fillStyle = '#ff2a2a';
+      ctx.beginPath();
+      ctx.arc(halfLen, 0, tipRadius, 0, Math.PI * 2);
+      ctx.fill();
 
       ctx.restore();
-
-      // Crosshair
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath();
-      ctx.moveTo(cx - 20, cy); ctx.lineTo(cx + 20, cy);
-      ctx.moveTo(cx, cy - 20); ctx.lineTo(cx, cy + 20);
-      ctx.stroke();
     }
 
     function tick(ts) {
       const dt = Math.min(0.05, (ts - last) / 1000);
       last = ts;
       const speed = parseFloat(speedEl.value) || 0;
+      const p = currentStickParams();
       speedOut.textContent = String(Math.round(speed));
+      lengthOut.textContent = String(Math.round(p.lengthPct));
+      thicknessOut.textContent = String(Math.round(p.lineWidth));
       if (autoRotate) {
-        angle = (angle + dt * speed) % 360;
-        angleEl.value = angle.toFixed(1);
+        // Canvas positive rotation is clockwise in image space, so subtract for CCW motion.
+        angle = normalize360(angle - dt * speed);
+        angleEl.value = displayAngle(angle).toFixed(1);
       } else {
-        angle = parseFloat(angleEl.value) || 0;
+        angle = ccwToImageAngle(parseFloat(angleEl.value) || 0);
       }
       angleOut.textContent = `${displayAngle(angle).toFixed(1)}°`;
       drawMarker(angle);
@@ -254,7 +292,7 @@
     }
 
     angleEl.addEventListener('input', () => {
-      if (!autoRotate) angle = parseFloat(angleEl.value) || 0;
+      if (!autoRotate) angle = ccwToImageAngle(parseFloat(angleEl.value) || 0);
     });
 
     spinBtn.addEventListener('click', () => {
@@ -265,13 +303,17 @@
     });
 
     speedEl.addEventListener('input', () => {
-      try { localStorage.setItem(SPEED_KEY, speedEl.value); } catch (e) {}
+    });
+    lengthEl.addEventListener('input', () => {
+    });
+    thicknessEl.addEventListener('input', () => {
     });
 
-    try {
-      const saved = localStorage.getItem(SPEED_KEY);
-      if (saved !== null && saved !== '') speedEl.value = saved;
-    } catch (e) {}
+    speedEl.value = speedEl.defaultValue;
+    lengthEl.value = lengthEl.defaultValue;
+    thicknessEl.value = thicknessEl.defaultValue;
+    angleEl.value = angleEl.defaultValue;
+    angle = ccwToImageAngle(parseFloat(angleEl.value) || 0);
 
     qrLink.addEventListener('click', (e) => {
       e.preventDefault();

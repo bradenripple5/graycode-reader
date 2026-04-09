@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rotation Detection via Edge Geometry</title>
+  <title>Rotation Detection using Least Squares</title>
   <style>
     body { font-family: sans-serif; margin: 20px; background: #f3f3f3; }
     .panel { max-width: 900px; margin: 0 auto; background: #fff; padding: 16px; border-radius: 8px; }
@@ -26,20 +26,21 @@
 </head>
 <body>
   <div class="panel">
-    <h2>Rotation Detection via Edge Geometry</h2>
+    <h2>Rotation Detection using Least Squares</h2>
     <div class="row">
       <button id="collapseBtn" class="toggle-btn" title="Show/Hide controls">+</button>
       <span id="houghAvg" class="angle-big">Angle: -</span>
     </div>
     <div id="advancedControls" class="row">
-      <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
+      <label>Threshold <input id="thr" type="range" min="20" max="220" value="220" /></label>
       <label>hough avg window <span id="houghWindowVal">5</span> <input id="houghWindow" type="range" min="1" max="30" value="5" /></label>
       <label>MC points <span id="mcPointsVal">1200</span> <input id="mcPoints" type="range" min="100" max="5000" step="50" value="1200" /></label>
       <label>intersections target <span id="intersectionTargetVal">300</span> <input id="intersectionTarget" type="range" min="20" max="1200" step="10" value="300" /></label>
       <label><input id="mcMode" type="checkbox" /> binary monte carlo</label>
       <label><input id="checkerMode" type="checkbox" /> checker run-length angle</label>
       <label><input id="intersectionMode" type="checkbox" /> checker intersections</label>
-      <label><input id="centerPerpMode" type="checkbox" checked /> find- perpendicular vectors along center column</label>
+      <label><input id="lineTipMode" type="checkbox" checked /> rotation detection using least squares + red tip direction</label>
+      <label><input id="centerPerpMode" type="checkbox" /> find- perpendicular vectors along center column</label>
       <label><input id="justEdges" type="checkbox" /> just edge detection</label>
       <label><input id="justHough" type="checkbox" /> just hough (make sure the vertical bars are the only thing in view)</label>
       <span id="detectStatus">Status: idle</span>
@@ -49,9 +50,9 @@
       <span id="lineAngles">Angles: -</span>
       <span id="lineAvg">Lines(20) Gaussian Avg: -</span>
       <span id="barAvg">Bars(10) Avg: -</span>
+      <span style="color:#8a2f2f;font-weight:700;">Make sure only the match stick is visible in the viewer.</span>
     </div>
     <canvas id="cv" width="900" height="560"></canvas>
-    <div id="midBits" class="mid-bits">mid row bits: -</div>
   </div>
   <video id="video" playsinline style="display:none"></video>
 
@@ -71,6 +72,7 @@
     const mcModeEl = document.getElementById('mcMode');
     const checkerModeEl = document.getElementById('checkerMode');
     const intersectionModeEl = document.getElementById('intersectionMode');
+    const lineTipModeEl = document.getElementById('lineTipMode');
     const centerPerpModeEl = document.getElementById('centerPerpMode');
     const justEdgesEl = document.getElementById('justEdges');
     const justHoughEl = document.getElementById('justHough');
@@ -82,8 +84,6 @@
     const lineAvgEl = document.getElementById('lineAvg');
     const houghAvgEl = document.getElementById('houghAvg');
     const barAvgEl = document.getElementById('barAvg');
-    const midBitsEl = document.getElementById('midBits');
-    const THRESHOLD_KEY = 'edge_detection_threshold_v1';
     const SETTINGS_KEY = 'rotation_detection_settings_v3';
 
     const work = document.createElement('canvas');
@@ -921,7 +921,8 @@
     }
 
     function displayAngle(a) {
-      return normalize360(a + 90);
+      // Convert image-space clockwise angle to conventional counterclockwise angle.
+      return normalize360(360 - a);
     }
 
     function angleDelta360(a, b) {
@@ -1294,6 +1295,354 @@
       return { x: sx / n, y: sy / n };
     }
 
+    function collectComponentFromSeed(bin, w, h, seedX, seedY) {
+      if (seedX < 1 || seedX >= w - 1 || seedY < 1 || seedY >= h - 1) return null;
+      if (!bin[seedY * w + seedX]) return null;
+      const visited = new Uint8Array(w * h);
+      const q = new Int32Array(w * h);
+      let head = 0, tail = 0;
+      const seed = seedY * w + seedX;
+      q[tail++] = seed;
+      visited[seed] = 1;
+      const pts = [];
+      while (head < tail) {
+        const idx = q[head++];
+        const y = (idx / w) | 0;
+        const x = idx - y * w;
+        pts.push({ x, y });
+        for (let oy = -1; oy <= 1; oy++) {
+          const yy = y + oy;
+          if (yy < 1 || yy >= h - 1) continue;
+          for (let ox = -1; ox <= 1; ox++) {
+            if (ox === 0 && oy === 0) continue;
+            const xx = x + ox;
+            if (xx < 1 || xx >= w - 1) continue;
+            const ni = yy * w + xx;
+            if (visited[ni] || !bin[ni]) continue;
+            visited[ni] = 1;
+            q[tail++] = ni;
+          }
+        }
+      }
+      return { points: pts, seedX, seedY };
+    }
+
+    function collectComponentFromMidColumn(bin, w, h) {
+      const midX = (w * 0.5) | 0;
+      let seedY = -1;
+      for (let y = 1; y < h - 1; y++) {
+        if (bin[y * w + midX]) { seedY = y; break; }
+      }
+      if (seedY < 0) return null;
+      return collectComponentFromSeed(bin, w, h, midX, seedY);
+    }
+
+    function collectComponentFromThirdsGrid(bin, w, h) {
+      const xs = [Math.round(w / 3), Math.round((2 * w) / 3)].map((x) => Math.max(1, Math.min(w - 2, x)));
+      const ys = [Math.round(h / 3), Math.round((2 * h) / 3)].map((y) => Math.max(1, Math.min(h - 2, y)));
+      let seedX = -1, seedY = -1;
+
+      // 1) First try grid intersections.
+      for (let iy = 0; iy < ys.length && seedX < 0; iy++) {
+        for (let ix = 0; ix < xs.length && seedX < 0; ix++) {
+          const cx = xs[ix], cy = ys[iy];
+          if (bin[cy * w + cx]) {
+            seedX = cx; seedY = cy; break;
+          }
+          for (let r = 1; r <= 3 && seedX < 0; r++) {
+            for (let oy = -r; oy <= r && seedX < 0; oy++) {
+              const yy = cy + oy;
+              if (yy < 1 || yy >= h - 1) continue;
+              for (let ox = -r; ox <= r; ox++) {
+                const xx = cx + ox;
+                if (xx < 1 || xx >= w - 1) continue;
+                if (bin[yy * w + xx]) { seedX = xx; seedY = yy; break; }
+              }
+            }
+          }
+        }
+      }
+
+      // 2) Fallback: scan thirds horizontal rows.
+      for (let iy = 0; iy < ys.length && seedX < 0; iy++) {
+        const y = ys[iy];
+        for (let x = 1; x < w - 1; x++) {
+          if (bin[y * w + x]) { seedX = x; seedY = y; break; }
+        }
+      }
+
+      // 3) Fallback: scan thirds vertical columns.
+      for (let ix = 0; ix < xs.length && seedX < 0; ix++) {
+        const x = xs[ix];
+        for (let y = 1; y < h - 1; y++) {
+          if (bin[y * w + x]) { seedX = x; seedY = y; break; }
+        }
+      }
+
+      if (seedX < 0) return null;
+      return collectComponentFromSeed(bin, w, h, seedX, seedY);
+    }
+
+    function collectComponentFromMidRow(bin, w, h) {
+      const midY = (h * 0.5) | 0;
+      const midX = (w * 0.5) | 0;
+      let seedX = -1;
+      // Search from center outward to prioritize the center crossing.
+      for (let d = 0; d < w; d++) {
+        const xl = midX - d;
+        const xr = midX + d;
+        if (xl >= 1 && xl < w - 1 && bin[midY * w + xl]) { seedX = xl; break; }
+        if (xr >= 1 && xr < w - 1 && bin[midY * w + xr]) { seedX = xr; break; }
+      }
+      if (seedX < 0) return null;
+      const visited = new Uint8Array(w * h);
+      const q = new Int32Array(w * h);
+      let head = 0, tail = 0;
+      const seed = midY * w + seedX;
+      q[tail++] = seed;
+      visited[seed] = 1;
+      const pts = [];
+      while (head < tail) {
+        const idx = q[head++];
+        const y = (idx / w) | 0;
+        const x = idx - y * w;
+        pts.push({ x, y });
+        for (let oy = -1; oy <= 1; oy++) {
+          const yy = y + oy;
+          if (yy < 1 || yy >= h - 1) continue;
+          for (let ox = -1; ox <= 1; ox++) {
+            if (ox === 0 && oy === 0) continue;
+            const xx = x + ox;
+            if (xx < 1 || xx >= w - 1) continue;
+            const ni = yy * w + xx;
+            if (visited[ni] || !bin[ni]) continue;
+            visited[ni] = 1;
+            q[tail++] = ni;
+          }
+        }
+      }
+      return { points: pts, seedX, seedY: midY };
+    }
+
+    function estimateSingleLineWithTipFromComponent(cc, w, h, redCentroid = null) {
+      if (!cc || cc.points.length < 25) return null;
+      const pts = cc.points;
+
+      let mx = 0, my = 0;
+      for (let i = 0; i < pts.length; i++) {
+        mx += pts[i].x;
+        my += pts[i].y;
+      }
+      mx /= pts.length;
+      my /= pts.length;
+
+      let sxx = 0, sxy = 0, syy = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const dx = pts[i].x - mx;
+        const dy = pts[i].y - my;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+      }
+      const tr = sxx + syy;
+      const det = sxx * syy - sxy * sxy;
+      const disc = Math.max(0, tr * tr - 4 * det);
+      const lambda = 0.5 * (tr + Math.sqrt(disc));
+      let ux = sxy;
+      let uy = lambda - sxx;
+      if (Math.abs(ux) + Math.abs(uy) < 1e-6) {
+        ux = 1;
+        uy = 0;
+      }
+      const un = Math.hypot(ux, uy);
+      ux /= un;
+      uy /= un;
+
+      let tMin = 1e9, tMax = -1e9;
+      for (let i = 0; i < pts.length; i++) {
+        const t = (pts[i].x - mx) * ux + (pts[i].y - my) * uy;
+        if (t < tMin) tMin = t;
+        if (t > tMax) tMax = t;
+      }
+      if (tMax - tMin < 20) return null;
+
+      const p1 = { x: mx + ux * tMin, y: my + uy * tMin };
+      const p2 = { x: mx + ux * tMax, y: my + uy * tMax };
+
+      let tail = p1, tip = p2;
+      if (redCentroid) {
+        const d1 = (p1.x - redCentroid.x) * (p1.x - redCentroid.x) + (p1.y - redCentroid.y) * (p1.y - redCentroid.y);
+        const d2 = (p2.x - redCentroid.x) * (p2.x - redCentroid.x) + (p2.y - redCentroid.y) * (p2.y - redCentroid.y);
+        tip = d1 <= d2 ? p1 : p2;
+        tail = d1 <= d2 ? p2 : p1;
+      }
+      const angle = normalize360((Math.atan2(tip.y - tail.y, tip.x - tail.x) * 180) / Math.PI);
+      return { angle, tail, tip, points: pts.length, seedX: cc.seedX, seedY: cc.seedY };
+    }
+
+    function estimateSingleLineWithTip(bin, w, h, redCentroid = null) {
+      return estimateSingleLineWithTipFromComponent(collectComponentFromMidColumn(bin, w, h), w, h, redCentroid);
+    }
+
+    function estimateSingleLineWithTipFromGrid(bin, w, h, redCentroid = null) {
+      return estimateSingleLineWithTipFromComponent(collectComponentFromThirdsGrid(bin, w, h), w, h, redCentroid);
+    }
+
+    function estimateSingleLineWithTipFromRow(bin, w, h, redCentroid = null) {
+      return estimateSingleLineWithTipFromComponent(collectComponentFromMidRow(bin, w, h), w, h, redCentroid);
+    }
+
+    function estimateLineFromGrid10Variation(bin, w, h, redCentroid = null) {
+      const xs = [];
+      const ys = [];
+      for (let i = 0; i < 10; i++) {
+        xs.push(Math.max(1, Math.min(w - 2, Math.round(((i + 0.5) * w) / 10))));
+        ys.push(Math.max(1, Math.min(h - 2, Math.round(((i + 0.5) * h) / 10))));
+      }
+
+      const hPoints = [];
+      const vPoints = [];
+      let hVar = 0;
+      let vVar = 0;
+      let hHitLines = 0;
+      let vHitLines = 0;
+
+      for (let i = 0; i < ys.length; i++) {
+        const y = ys[i];
+        let prev = bin[y * w + 1];
+        let hasHit = prev === 1;
+        if (prev) hPoints.push({ x: 1, y });
+        for (let x = 2; x < w - 1; x++) {
+          const v = bin[y * w + x];
+          if (v !== prev) hVar++;
+          if (v) { hPoints.push({ x, y }); hasHit = true; }
+          prev = v;
+        }
+        if (hasHit) hHitLines++;
+      }
+
+      for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
+        let prev = bin[1 * w + x];
+        let hasHit = prev === 1;
+        if (prev) vPoints.push({ x, y: 1 });
+        for (let y = 2; y < h - 1; y++) {
+          const v = bin[y * w + x];
+          if (v !== prev) vVar++;
+          if (v) { vPoints.push({ x, y }); hasHit = true; }
+          prev = v;
+        }
+        if (hasHit) vHitLines++;
+      }
+
+      const hScore = hVar + hHitLines * 3;
+      const vScore = vVar + vHitLines * 3;
+      const useHorizontal = hScore > vScore || (hScore === vScore && hPoints.length >= vPoints.length);
+      const points = useHorizontal ? hPoints : vPoints;
+      if (points.length < 25) return null;
+
+      const est = estimateSingleLineWithTipFromComponent({ points, seedX: null, seedY: null }, w, h, redCentroid);
+      if (!est) return null;
+      est.gridMode = useHorizontal ? 'grid10-horizontal' : 'grid10-vertical';
+      est.hVar = hVar;
+      est.vVar = vVar;
+      est.hHitLines = hHitLines;
+      est.vHitLines = vHitLines;
+      return est;
+    }
+
+    function estimateCenterAngleBinarySearch(bin, w, h, redCentroid = null) {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      const span = Math.hypot(w, h) * 0.5;
+
+      function scoreAt(deg) {
+        const r = (deg * Math.PI) / 180;
+        const ux = Math.cos(r), uy = Math.sin(r);
+        const nx = -uy, ny = ux;
+        const band = 3;
+        let hits = 0;
+        let run = 0;
+        let bestRun = 0;
+        for (let t = -span; t <= span; t += 1) {
+          let on = false;
+          for (let b = -band; b <= band; b++) {
+            const x = Math.round(cx + ux * t + nx * b);
+            const y = Math.round(cy + uy * t + ny * b);
+            if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+            if (bin[y * w + x]) { on = true; break; }
+          }
+          if (on) {
+            hits++;
+            run++;
+            if (run > bestRun) bestRun = run;
+          } else {
+            run = 0;
+          }
+        }
+        return hits * 0.35 + bestRun * 1.2;
+      }
+
+      let bestA = 0;
+      let bestS = -1e9;
+      for (let a = 0; a < 180; a += 12) {
+        const s = scoreAt(a);
+        if (s > bestS) { bestS = s; bestA = a; }
+      }
+      if (bestS <= 8) return null;
+
+      let left = bestA - 12;
+      let right = bestA + 12;
+      for (let i = 0; i < 10; i++) {
+        const mid = 0.5 * (left + right);
+        const lmid = 0.5 * (left + mid);
+        const rmid = 0.5 * (mid + right);
+        const sl = scoreAt(((lmid % 180) + 180) % 180);
+        const sm = scoreAt(((mid % 180) + 180) % 180);
+        const sr = scoreAt(((rmid % 180) + 180) % 180);
+        if (sm >= sl && sm >= sr) {
+          left = lmid;
+          right = rmid;
+        } else if (sl > sr) {
+          right = mid;
+        } else {
+          left = mid;
+        }
+      }
+      const base = ((0.5 * (left + right)) % 180 + 180) % 180;
+      const rr = (base * Math.PI) / 180;
+      const ux = Math.cos(rr), uy = Math.sin(rr);
+      const nx = -uy, ny = ux;
+
+      let tMin = 1e9, tMax = -1e9, used = 0;
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          if (!bin[y * w + x]) continue;
+          const dx = x - cx;
+          const dy = y - cy;
+          const dist = Math.abs(dx * nx + dy * ny);
+          if (dist > 4) continue;
+          const t = dx * ux + dy * uy;
+          if (t < tMin) tMin = t;
+          if (t > tMax) tMax = t;
+          used++;
+        }
+      }
+      if (used < 25 || tMax - tMin < 20) return null;
+
+      const p1 = { x: cx + ux * tMin, y: cy + uy * tMin };
+      const p2 = { x: cx + ux * tMax, y: cy + uy * tMax };
+      let tail = p1, tip = p2;
+      if (redCentroid) {
+        const d1 = (p1.x - redCentroid.x) * (p1.x - redCentroid.x) + (p1.y - redCentroid.y) * (p1.y - redCentroid.y);
+        const d2 = (p2.x - redCentroid.x) * (p2.x - redCentroid.x) + (p2.y - redCentroid.y) * (p2.y - redCentroid.y);
+        tip = d1 <= d2 ? p1 : p2;
+        tail = d1 <= d2 ? p2 : p1;
+      }
+      const angle = normalize360((Math.atan2(tip.y - tail.y, tip.x - tail.x) * 180) / Math.PI);
+      return { angle, tail, tip, points: used, seedX: null, seedY: null, fallback: true };
+    }
+
     function smoothHough(frameAngle) {
       function gaussianPdf(x, mu, sigma) {
         const s = Math.max(1e-6, sigma);
@@ -1354,9 +1703,6 @@
         }
         const thr = parseInt(thrEl.value, 10);
         const bin = buildBinaryFromGray(gray, thr);
-        const midY = Math.floor(rh * 0.5);
-        const midBits = bitsFromRow(bin, rw, midY, 0, rw - 1);
-        midBitsEl.textContent = `mid row bits: ${midBits}`;
         const binaryRgba = binaryToRgba(bin, rw, rh);
         let ones = 0;
         for (let i = 0; i < bin.length; i++) ones += bin[i];
@@ -1365,7 +1711,7 @@
         let edgeRgba;
         let edgeCount = 0;
         let mcLines = [];
-        if (mcModeEl.checked || checkerModeEl.checked || intersectionModeEl.checked || centerPerpModeEl.checked) {
+        if (mcModeEl.checked || checkerModeEl.checked || intersectionModeEl.checked || lineTipModeEl.checked || centerPerpModeEl.checked) {
           const bb = buildBinaryBoundary(gray, rw, rh, thr);
           edgeRgba = bb.edgeRgba;
           edgeCount = bb.points.length;
@@ -1378,11 +1724,11 @@
         detectStatusEl.textContent = edgeCount > 0 ? `Status: edges detected (${edgeCount})` : 'Status: no edges detected';
         const redCentroid = detectRedCentroid(d, work.width, rx0, ry0, rw, rh);
         const upInfo = redUpInfo(redCentroid, rw, rh);
-        redUpEl.textContent = upInfo ? `Red Up: ${upInfo.dir} (${upInfo.up90.toFixed(1)}°)` : 'Red Up: -';
+        redUpEl.textContent = upInfo ? `Red Up: ${upInfo.dir} (${upInfo.up90.toFixed(2)}°)` : 'Red Up: -';
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, cv.width, cv.height);
         // In checker mode, show pure thresholded 0/1 image for verification.
-        const viewRgba = (checkerModeEl.checked || intersectionModeEl.checked || centerPerpModeEl.checked) ? binaryRgba : edgeRgba;
+        const viewRgba = (checkerModeEl.checked || intersectionModeEl.checked || lineTipModeEl.checked || centerPerpModeEl.checked) ? binaryRgba : edgeRgba;
         ctx.putImageData(new ImageData(viewRgba, rw, rh), rx0, ry0);
         if (justEdgesEl.checked) {
           for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
@@ -1400,9 +1746,9 @@
           const pts = detectCheckerIntersections(bin, rw, rh, targetPts);
           intersectionStatsEl.textContent = `Intersections: ${pts.length}`;
           const ia = estimateAngleFromIntersections(pts, rw, rh, redCentroid);
-          houghAvgEl.textContent = ia === null ? 'Angle: -' : `Angle: ${displayAngle(ia).toFixed(1)}°`;
-          lineAnglesEl.textContent = ia === null ? 'Angles: -' : `Angles: intersections=${displayAngle(ia).toFixed(1)}°`;
-          lineAvgEl.textContent = ia === null ? 'Intersection Avg: -' : `Intersection Avg: ${displayAngle(ia).toFixed(1)}°`;
+          houghAvgEl.textContent = ia === null ? 'Angle: -' : `Angle: ${displayAngle(ia).toFixed(2)}°`;
+          lineAnglesEl.textContent = ia === null ? 'Angles: -' : `Angles: intersections=${displayAngle(ia).toFixed(2)}°`;
+          lineAvgEl.textContent = ia === null ? 'Intersection Avg: -' : `Intersection Avg: ${displayAngle(ia).toFixed(2)}°`;
           barAvgEl.textContent = 'Bars(10) Avg: -';
           ctx.save();
           ctx.fillStyle = 'rgba(255,40,40,0.95)';
@@ -1411,11 +1757,47 @@
           drawRoiOverlay();
           return;
         }
+        if (lineTipModeEl.checked) {
+          const grid10 = estimateLineFromGrid10Variation(bin, rw, rh, redCentroid);
+          const bsLine = grid10 ? null : estimateCenterAngleBinarySearch(bin, rw, rh, redCentroid);
+          const line = grid10 || bsLine;
+          const modeName = grid10 ? grid10.gridMode : (line ? 'line-tip-bsearch' : 'line-tip');
+          houghAvgEl.textContent = line === null ? 'Angle: -' : `Angle: ${displayAngle(line.angle).toFixed(2)}°`;
+          lineAnglesEl.textContent = line === null ? 'Angles: -' : `Angles: ${modeName}=${displayAngle(line.angle).toFixed(2)}°`;
+          lineAvgEl.textContent = line === null ? 'Line-Tip Avg: -' : `Line-Tip Avg: ${displayAngle(line.angle).toFixed(2)}°`;
+          barAvgEl.textContent = 'Bars(10) Avg: -';
+          if (line === null) {
+            intersectionStatsEl.textContent = 'Intersections: -';
+          } else if (grid10) {
+            intersectionStatsEl.textContent =
+              `Intersections: ${grid10.gridMode} hVar=${grid10.hVar} vVar=${grid10.vVar} hHits=${grid10.hHitLines} vHits=${grid10.vHitLines} pts=${line.points}`;
+          } else if (bsLine) {
+            intersectionStatsEl.textContent = `Intersections: fallback=center-angle-bsearch fg-points=${line.points}`;
+          }
+          if (line) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(80,210,255,0.98)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(rx0 + line.tail.x, ry0 + line.tail.y);
+            ctx.lineTo(rx0 + line.tip.x, ry0 + line.tip.y);
+            ctx.stroke();
+            ctx.fillStyle = '#ff2a2a';
+            ctx.fillRect(rx0 + line.tip.x - 4, ry0 + line.tip.y - 4, 8, 8);
+            if (!bsLine && line.seedX != null && line.seedY != null) {
+              ctx.fillStyle = '#ffe600';
+              ctx.fillRect(rx0 + line.seedX - 3, ry0 + line.seedY - 3, 6, 6);
+            }
+            ctx.restore();
+          }
+          drawRoiOverlay();
+          return;
+        }
         if (centerPerpModeEl.checked) {
           const res = angleFromCenterPerp(bin, rw, rh, redCentroid);
-          houghAvgEl.textContent = res.angle === null ? 'Angle: -' : `Angle: ${displayAngle(res.angle).toFixed(1)}°`;
-          lineAnglesEl.textContent = res.angle === null ? 'Angles: -' : `Angles: center-perp=${displayAngle(res.angle).toFixed(1)}°`;
-          lineAvgEl.textContent = res.angle === null ? 'Center-Perp Avg: -' : `Center-Perp Avg: ${displayAngle(res.angle).toFixed(1)}°`;
+          houghAvgEl.textContent = res.angle === null ? 'Angle: -' : `Angle: ${displayAngle(res.angle).toFixed(2)}°`;
+          lineAnglesEl.textContent = res.angle === null ? 'Angles: -' : `Angles: center-perp=${displayAngle(res.angle).toFixed(2)}°`;
+          lineAvgEl.textContent = res.angle === null ? 'Center-Perp Avg: -' : `Center-Perp Avg: ${displayAngle(res.angle).toFixed(2)}°`;
           barAvgEl.textContent = 'Bars(10) Avg: -';
           intersectionStatsEl.textContent = `Intersections: ${res.segments.length}`;
           ctx.save();
@@ -1441,9 +1823,9 @@
         }
         if (checkerModeEl.checked) {
           const checkerRaw = estimateAngleFromGrid10(gray, rw, rh, thr, redCentroid);
-          houghAvgEl.textContent = checkerRaw === null ? 'Angle: -' : `Angle: ${displayAngle(checkerRaw).toFixed(1)}°`;
-          lineAnglesEl.textContent = checkerRaw === null ? 'Angles: -' : `Angles: grid10=${displayAngle(checkerRaw).toFixed(1)}°`;
-          lineAvgEl.textContent = checkerRaw === null ? 'Grid(10x10) Avg: -' : `Grid(10x10) Avg: ${displayAngle(checkerRaw).toFixed(1)}°`;
+          houghAvgEl.textContent = checkerRaw === null ? 'Angle: -' : `Angle: ${displayAngle(checkerRaw).toFixed(2)}°`;
+          lineAnglesEl.textContent = checkerRaw === null ? 'Angles: -' : `Angles: grid10=${displayAngle(checkerRaw).toFixed(2)}°`;
+          lineAvgEl.textContent = checkerRaw === null ? 'Grid(10x10) Avg: -' : `Grid(10x10) Avg: ${displayAngle(checkerRaw).toFixed(2)}°`;
           barAvgEl.textContent = 'Bars(10) Avg: -';
           intersectionStatsEl.textContent = 'Intersections: -';
           drawGrid10Overlay(rx0, ry0, rw, rh);
@@ -1469,7 +1851,7 @@
               const ln = mcLines[i];
               angles.push(ln.ang360);
               lens.push(ln.len);
-              angleTexts.push(`${i + 1}:${displayAngle(ln.ang360).toFixed(1)}°`);
+              angleTexts.push(`${i + 1}:${displayAngle(ln.ang360).toFixed(2)}°`);
               ctx.strokeStyle = colors[i % colors.length];
               ctx.beginPath();
               ctx.moveTo(rx0 + ln.x1, ry0 + ln.y1);
@@ -1482,8 +1864,8 @@
             const preview = angleTexts.slice(0, 10).join('  ');
             lineAnglesEl.textContent = angleTexts.length > 10 ? `Angles: ${preview} ...` : `Angles: ${preview}`;
             const mcAvg = gaussianWeightedAverageAngles360(angles, lens, LINE_GAUSS_SIGMA_DEG);
-            lineAvgEl.textContent = `MC Lines(${mcLines.length}) Gaussian Avg: ${displayAngle(mcAvg).toFixed(1)}°`;
-            houghAvgEl.textContent = `Angle: ${displayAngle(mcAvg).toFixed(1)}°`;
+            lineAvgEl.textContent = `MC Lines(${mcLines.length}) Gaussian Avg: ${displayAngle(mcAvg).toFixed(2)}°`;
+            houghAvgEl.textContent = `Angle: ${displayAngle(mcAvg).toFixed(2)}°`;
           } else {
             lineAnglesEl.textContent = 'Angles: -';
             lineAvgEl.textContent = `MC Lines(${LINE_COUNT}) Gaussian Avg: -`;
@@ -1502,7 +1884,7 @@
           lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
           barAvgEl.textContent = 'Bars(10) Avg: -';
           const houghAvg = smoothHough(houghRawFrame);
-          houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+          houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(2)}°`;
           intersectionStatsEl.textContent = 'Intersections: -';
           drawRoiOverlay();
           return;
@@ -1537,7 +1919,7 @@
             const avgAng = pushAngleAverage(i, ang, LINE_HISTORY_LEN, LINE_OUTLIER_DELTA);
             smoothAngles.push(avgAng);
             lineLens.push(ln.len);
-            angleTexts.push(`${i + 1}:${displayAngle(avgAng).toFixed(1)}°`);
+            angleTexts.push(`${i + 1}:${displayAngle(avgAng).toFixed(2)}°`);
             ctx.strokeStyle = colors[i % colors.length];
             ctx.beginPath();
             ctx.moveTo(rx0 + x1, ry0 + y1);
@@ -1552,7 +1934,7 @@
           const preview = angleTexts.slice(0, 10).join('  ');
           lineAnglesEl.textContent = angleTexts.length > 10 ? `Angles: ${preview} ...` : `Angles: ${preview}`;
           const lineAvg = gaussianWeightedAverageAngles360(smoothAngles, lineLens, LINE_GAUSS_SIGMA_DEG);
-          lineAvgEl.textContent = `Lines(${lines.length}) Gaussian Avg: ${displayAngle(lineAvg).toFixed(1)}°`;
+          lineAvgEl.textContent = `Lines(${lines.length}) Gaussian Avg: ${displayAngle(lineAvg).toFixed(2)}°`;
         } else {
           for (let i = 0; i < LINE_COUNT; i++) angleHistory[i].length = 0;
           lineAnglesEl.textContent = 'Angles: -';
@@ -1580,17 +1962,17 @@
             ctx.stroke();
           }
           ctx.restore();
-          barAvgEl.textContent = `Bars(${bars.length}) Avg: ${avg.toFixed(1)}°`;
+          barAvgEl.textContent = `Bars(${bars.length}) Avg: ${avg.toFixed(2)}°`;
         } else {
           barAvgEl.textContent = 'Bars(10) Avg: -';
         }
         const houghAvg = smoothHough(houghRawFrame);
-        houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(1)}°`;
+        houghAvgEl.textContent = houghAvg === null ? 'Angle: -' : `Angle: ${displayAngle(houghAvg).toFixed(2)}°`;
         intersectionStatsEl.textContent = 'Intersections: -';
         if (usedHoughFallbackForLines) {
           lineAvgEl.textContent = houghAvg === null
             ? `Lines(${LINE_COUNT}) Gaussian Avg: -`
-            : `Lines(${lines.length}) Gaussian Avg (Hough fallback): ${displayAngle(houghAvg).toFixed(1)}°`;
+            : `Lines(${lines.length}) Gaussian Avg (Hough fallback): ${displayAngle(houghAvg).toFixed(2)}°`;
         }
         drawRoiOverlay();
       } catch (e) {
@@ -1626,7 +2008,6 @@
       lineAvgEl.textContent = `Lines(${LINE_COUNT}) Gaussian Avg: -`;
       houghAvgEl.textContent = 'Angle: -';
       barAvgEl.textContent = 'Bars(10) Avg: -';
-      midBitsEl.textContent = 'mid row bits: -';
       redUpEl.textContent = 'Red Up: -';
       binStatsEl.textContent = 'Binary: -';
       intersectionStatsEl.textContent = 'Intersections: -';
@@ -1635,7 +2016,6 @@
     }
 
     thrEl.oninput = () => {
-      try { localStorage.setItem(THRESHOLD_KEY, thrEl.value); } catch (e) {}
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
@@ -1667,7 +2047,7 @@
       }
     };
     mcModeEl.onchange = () => {
-      if (mcModeEl.checked) { justHoughEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      if (mcModeEl.checked) { justHoughEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; lineTipModeEl.checked = false; centerPerpModeEl.checked = false; }
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
@@ -1675,7 +2055,7 @@
       }
     };
     checkerModeEl.onchange = () => {
-      if (checkerModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      if (checkerModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; intersectionModeEl.checked = false; lineTipModeEl.checked = false; centerPerpModeEl.checked = false; }
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
@@ -1683,7 +2063,15 @@
       }
     };
     intersectionModeEl.onchange = () => {
-      if (intersectionModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; centerPerpModeEl.checked = false; }
+      if (intersectionModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; lineTipModeEl.checked = false; centerPerpModeEl.checked = false; }
+      persistSettings();
+      if (video.srcObject) {
+        cancelAnimationFrame(raf);
+        process();
+      }
+    };
+    lineTipModeEl.onchange = () => {
+      if (lineTipModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
@@ -1691,7 +2079,7 @@
       }
     };
     centerPerpModeEl.onchange = () => {
-      if (centerPerpModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; }
+      if (centerPerpModeEl.checked) { justHoughEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; lineTipModeEl.checked = false; }
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
@@ -1707,17 +2095,13 @@
       }
     };
     justHoughEl.onchange = () => {
-      if (justHoughEl.checked) { justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false; }
+      if (justHoughEl.checked) { justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; lineTipModeEl.checked = false; centerPerpModeEl.checked = false; }
       persistSettings();
       if (video.srcObject) {
         cancelAnimationFrame(raf);
         process();
       }
     };
-    try {
-      const saved = localStorage.getItem(THRESHOLD_KEY);
-      if (saved !== null && saved !== '') thrEl.value = saved;
-    } catch (e) {}
     function persistSettings() {
       const s = {
         houghWindow: houghWindowEl.value,
@@ -1728,6 +2112,7 @@
         mcMode: mcModeEl.checked,
         checkerMode: checkerModeEl.checked,
         intersectionMode: intersectionModeEl.checked,
+        lineTipMode: lineTipModeEl.checked,
         centerPerpMode: centerPerpModeEl.checked
       };
       try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
@@ -1746,19 +2131,22 @@
         mcModeEl.checked = !!s.mcMode;
         checkerModeEl.checked = !!s.checkerMode;
         intersectionModeEl.checked = !!s.intersectionMode;
+        lineTipModeEl.checked = s.lineTipMode == null ? true : !!s.lineTipMode;
         centerPerpModeEl.checked = !!s.centerPerpMode;
 
         // enforce mutual exclusivity (priority order)
         if (justHoughEl.checked) {
-          justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; centerPerpModeEl.checked = false;
+          justEdgesEl.checked = false; mcModeEl.checked = false; checkerModeEl.checked = false; intersectionModeEl.checked = false; lineTipModeEl.checked = false; centerPerpModeEl.checked = false;
         } else {
-          const active = [mcModeEl.checked, checkerModeEl.checked, intersectionModeEl.checked, centerPerpModeEl.checked].filter(Boolean).length;
+          const active = [mcModeEl.checked, checkerModeEl.checked, intersectionModeEl.checked, lineTipModeEl.checked, centerPerpModeEl.checked].filter(Boolean).length;
           if (active > 1) {
-            // keep first checked in precedence: checker, center-perp, intersection, monte carlo
-            const keepChecker = checkerModeEl.checked;
-            const keepCenterPerp = !keepChecker && centerPerpModeEl.checked;
-            const keepIntersection = !keepChecker && !keepCenterPerp && intersectionModeEl.checked;
-            const keepMc = !keepChecker && !keepCenterPerp && !keepIntersection && mcModeEl.checked;
+            // keep first checked in precedence: line-tip, checker, center-perp, intersection, monte carlo
+            const keepLineTip = lineTipModeEl.checked;
+            const keepChecker = !keepLineTip && checkerModeEl.checked;
+            const keepCenterPerp = !keepLineTip && !keepChecker && centerPerpModeEl.checked;
+            const keepIntersection = !keepLineTip && !keepChecker && !keepCenterPerp && intersectionModeEl.checked;
+            const keepMc = !keepLineTip && !keepChecker && !keepCenterPerp && !keepIntersection && mcModeEl.checked;
+            lineTipModeEl.checked = keepLineTip;
             checkerModeEl.checked = keepChecker;
             centerPerpModeEl.checked = keepCenterPerp;
             intersectionModeEl.checked = keepIntersection;

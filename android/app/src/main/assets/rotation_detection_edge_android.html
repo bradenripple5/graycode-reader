@@ -17,7 +17,7 @@
     <div class="row">
       <button id="startBtn">Start</button>
       <button id="stopBtn" disabled>Stop</button>
-      <label>Threshold <input id="thr" type="range" min="20" max="220" value="80" /></label>
+      <label>Threshold <input id="thr" type="range" min="20" max="220" value="220" /></label>
       <label>Hough Window <span id="winOut">5</span> <input id="win" type="range" min="1" max="20" value="5" /></label>
       <span id="status">Status: idle</span>
     </div>
@@ -111,7 +111,7 @@
         ctx.putImageData(new ImageData(edge,roiW,roiH),rx,ry);
         ctx.strokeStyle='rgba(0,255,180,.95)'; ctx.lineWidth=2; ctx.strokeRect(rx,ry,roiW,roiH);
         const a=houghAngle(edge,roiW,roiH), avg=smoothHough(a);
-        houghEl.textContent=avg==null?'Hough Avg: -':`Hough Avg: ${(avg+90)%360|0}°`;
+        houghEl.textContent=avg==null?'Hough Avg: -':`Hough Avg: ${(((avg+90)%360+360)%360).toFixed(2)}°`;
       }catch(_e){}
       finally{ if(video.srcObject) raf=requestAnimationFrame(process); }
     }
