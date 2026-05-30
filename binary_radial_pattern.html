@@ -52,10 +52,31 @@
       margin-top: 10px;
       text-align: center;
     }
+    .green-detect-qr {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: 78px;
+      height: 78px;
+      padding: 5px;
+      border-radius: 4px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      z-index: 20;
+    }
+    .green-detect-qr img {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
   </style>
 </head>
 <body>
   <h1>Radial Binary Pattern</h1>
+
+  <a id="greenDetectQrLink" class="green-detect-qr" href="./green_detect.html" title="Open green_detect.html">
+    <img id="greenDetectQr" alt="QR code for green_detect.html">
+  </a>
 
   <div class="container">
     <div class="controls">
@@ -119,6 +140,36 @@
 
   <script>
     const baseRingWidth = 25;
+    const greenDetectQrLink = document.getElementById('greenDetectQrLink');
+    const greenDetectQr = document.getElementById('greenDetectQr');
+
+    function isLocalHostName(hostname) {
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname.endsWith('.local');
+    }
+
+    async function resolveGreenDetectUrl() {
+      const url = new URL('./green_detect.html', window.location.href);
+      if (!isLocalHostName(url.hostname)) return url.href;
+
+      try {
+        const res = await fetch('/__dev_lan_ip', { cache: 'no-store' });
+        if (!res.ok) return url.href;
+        const data = await res.json();
+        if (!data || !data.ip) return url.href;
+        const port = data.port ? `:${data.port}` : '';
+        return `${data.protocol || url.protocol}//${data.ip}${port}${url.pathname}`;
+      } catch (err) {
+        return url.href;
+      }
+    }
+
+    async function updateGreenDetectQr() {
+      const greenDetectUrl = await resolveGreenDetectUrl();
+      greenDetectQrLink.href = greenDetectUrl;
+      greenDetectQr.title = greenDetectUrl;
+      greenDetectQr.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&qzone=2&data=${encodeURIComponent(greenDetectUrl)}`;
+    }
+    updateGreenDetectQr();
 
     function renderRadialPattern(
       data,

@@ -3,104 +3,87 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gray Code Rotary Encoder Reader</title>
+  <title>Gray Code Reader</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      max-width: 1200px;
+      max-width: 1100px;
       margin: 0 auto;
       padding: 20px;
       background: #f5f5f5;
+      color: #222;
     }
     h1 {
       text-align: center;
-      color: #333;
+      margin: 0 0 16px;
     }
     .container {
-      background: white;
-      padding: 20px;
+      background: #fff;
+      padding: 18px;
       border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
     }
     .controls {
       display: flex;
       flex-wrap: wrap;
-      gap: 12px 18px;
       align-items: center;
-      margin-bottom: 16px;
+      gap: 12px 18px;
+      margin-bottom: 14px;
     }
     .controls.collapsed {
       display: none;
     }
+    .toggle-btn,
+    button {
+      border: 0;
+      border-radius: 4px;
+      cursor: pointer;
+    }
     .toggle-btn {
-      background: #222;
-      color: #fff;
-      border: none;
       width: 34px;
       height: 34px;
-      border-radius: 4px;
-      font-size: 18px;
-      cursor: pointer;
       margin-bottom: 10px;
-    }
-    .controls label {
-      font-size: 14px;
-      color: #333;
-    }
-    .controls input[type="range"] {
-      width: 160px;
-      vertical-align: middle;
+      background: #222;
+      color: #fff;
+      font-size: 18px;
     }
     button {
+      padding: 10px 16px;
       background: #007bff;
-      color: white;
-      border: none;
-      padding: 10px 18px;
-      border-radius: 4px;
-      cursor: pointer;
+      color: #fff;
       font-size: 14px;
     }
-    button:hover {
-      background: #0056b3;
-    }
     button:disabled {
-      background: #ccc;
+      background: #aaa;
       cursor: not-allowed;
     }
-    .binary-columns {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
+    label {
+      font-size: 14px;
+    }
+    input[type="range"] {
+      width: 155px;
+      vertical-align: middle;
+    }
+    .readout {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+      margin: 12px 0;
+      padding: 12px;
+      border-radius: 6px;
+      background: #f0f8ff;
+      color: #06436f;
       font-family: "Courier New", Courier, monospace;
-      font-size: 13px;
-      color: #111;
-      background: #f0f0f0;
-      border-radius: 6px;
-      padding: 8px 10px;
-      min-height: 26px;
+      font-size: 15px;
+      font-weight: 700;
     }
-    .metric-box {
-      display: inline-block;
-      margin-bottom: 10px;
-      padding: 8px 10px;
-      font-size: 13px;
-      color: #7b1f1f;
-      background: #fff0f0;
-      border-radius: 6px;
-      font-weight: 600;
-    }
-    .binary-columns .col {
-      white-space: nowrap;
-    }
-    .canvas-wrap {
-      position: relative;
-      display: inline-block;
+    .readout div {
+      min-height: 22px;
     }
     canvas {
       display: block;
       width: 100%;
-      max-width: 800px;
+      max-width: 900px;
       height: auto;
       background: #111;
       border-radius: 6px;
@@ -108,117 +91,76 @@
     .info {
       margin-top: 10px;
       font-size: 13px;
-      color: #666;
-    }
-    .metric {
-      font-size: 14px;
-      color: #145a32;
-      font-weight: 600;
-    }
-    .angle-display {
-      font-size: 24px;
-      font-weight: bold;
-      color: #007bff;
-      text-align: center;
-      padding: 15px;
-      background: #f0f8ff;
-      border-radius: 6px;
-      margin: 10px 0;
-    }
-    .section-title {
-      font-weight: bold;
-      margin-top: 15px;
-      margin-bottom: 5px;
-      color: #333;
+      color: #555;
     }
   </style>
 </head>
 <body>
-  <h1>🎯 Gray Code Rotary Encoder Reader</h1>
+  <h1>Gray Code Reader</h1>
   <div class="container">
     <button id="toggleControls" class="toggle-btn" title="Toggle controls">+</button>
     <div class="controls">
       <button id="startBtn">Start Camera</button>
       <button id="stopBtn" disabled>Stop</button>
-      <div class="metric">
-        Detections: <span id="squareCount">0</span>
-      </div>
 
       <label>
-        <input type="radio" name="detectMode" value="blue" checked>
-        Blue band intersections
-      </label>
-      <label>
-        <input type="radio" name="detectMode" value="green">
-        Green squares
-      </label>
-      <label>
-        <input id="enableIntersect" type="checkbox" checked>
-        Intersect detection
-      </label>
-
-      <br>
-
-      <label>
-        Number of bit tracks: <span id="bitRowsVal">6</span>
-        <input id="bitRows" type="range" min="3" max="12" value="6" step="1">
-        → 2<sup id="expVal">6</sup> = <span id="totalPositionsVal">64</span> positions
+        Bit tracks: <span id="bitRowsVal">8</span>
+        <input id="bitRows" type="range" min="3" max="12" value="8" step="1">
       </label>
 
       <label>
-        <input id="outerIsLsb" type="checkbox" checked>
-        Outermost track = LSB (usual)
-      </label>
-
-      <br>
-
-      <label>
-        Sections: <span id="sectionsVal">12</span>
-        <input id="sections" type="range" min="4" max="360" value="12" step="4">
+        White threshold: <span id="whiteThresholdVal">128</span>
+        <input id="whiteThreshold" type="range" min="20" max="235" value="128" step="1">
       </label>
 
       <label>
-        Center avg window: <span id="centerAvgVal">5</span>
-        <input id="centerAvg" type="range" min="1" max="20" value="5" step="1">
+        Blue min: <span id="blueMinVal">90</span>
+        <input id="blueMin" type="range" min="40" max="255" value="90" step="5">
       </label>
 
       <label>
-        Min neighbor distance: <span id="groupGapVal">20</span>
-        <input id="groupGap" type="range" min="1" max="200" value="20" step="1">
+        Blue delta: <span id="blueDeltaVal">35</span>
+        <input id="blueDelta" type="range" min="5" max="120" value="35" step="5">
       </label>
 
       <label>
-        Max neighbor dist: <span id="maxNeighborVal">60</span>
-        <input id="maxNeighbor" type="range" min="5" max="200" value="60" step="5">
+        Min blue width: <span id="minBlueWidthVal">28</span>px
+        <input id="minBlueWidth" type="range" min="4" max="180" value="28" step="2">
       </label>
 
       <label>
-        Downscale width: <span id="downscaleVal">600</span>
-        <input id="downscale" type="range" min="160" max="800" value="600" step="20">
+        Sample width: <span id="sampleWidthVal">22</span>%
+        <input id="sampleWidth" type="range" min="4" max="70" value="22" step="1">
+      </label>
+
+      <label>
+        Downscale width: <span id="downscaleVal">640</span>
+        <input id="downscale" type="range" min="240" max="960" value="640" step="20">
+      </label>
+
+      <label>
+        <input id="invertBits" type="checkbox">
+        Invert bits
+      </label>
+
+      <label>
+        <input id="reverseTracks" type="checkbox">
+        Reverse tracks
       </label>
     </div>
 
-    <div class="angle-display">
-      Angle: <span id="angleDisplay">---</span>°
-      <br>
-      <span style="font-size: 16px;">Position: <span id="positionDisplay">---</span></span>
+    <div class="readout">
+      <div>Angle: <span id="angleDisplay">n/a</span></div>
+      <div>Position: <span id="positionDisplay">n/a</span></div>
+      <div>Bits: <span id="bitsDisplay">n/a</span></div>
+      <div>Match: <span id="matchDisplay">n/a</span></div>
+      <div>Confidence: <span id="confidenceDisplay">n/a</span></div>
+      <div>Blue bands: <span id="bandsDisplay">n/a</span></div>
+      <div>Strip: <span id="stripDisplay">n/a</span></div>
     </div>
 
-    <div class="binary-columns" id="binaryColumns">
-      <div style="font-weight:bold;">Waiting for data...</div>
-    </div>
-
-    <div class="metric-box">
-      Red pixels: <span id="redPixelCount">0</span>
-      | Min: <span id="redPixelMin">0</span>
-      | Max: <span id="redPixelMax">0</span>
-      | Avg: <span id="redPixelAvg">0</span>
-    </div>
-
-    <div class="canvas-wrap">
-      <video id="video" style="display:none;"></video>
-      <canvas id="preview"></canvas>
-    </div>
+    <video id="video" style="display:none;"></video>
+    <canvas id="preview"></canvas>
 
     <div class="info" id="statusText">Idle.</div>
   </div>
@@ -227,314 +169,340 @@
     const video = document.getElementById('video');
     const preview = document.getElementById('preview');
     const ctx = preview.getContext('2d', { willReadFrequently: true });
+
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const toggleControls = document.getElementById('toggleControls');
+    const controls = document.querySelector('.controls');
     const statusText = document.getElementById('statusText');
-    const squareCount = document.getElementById('squareCount');
-    const binaryColumns = document.getElementById('binaryColumns');
-    const angleDisplay = document.getElementById('angleDisplay');
-    const positionDisplay = document.getElementById('positionDisplay');
-    const redPixelCount = document.getElementById('redPixelCount');
-    const redPixelMin = document.getElementById('redPixelMin');
-    const redPixelMax = document.getElementById('redPixelMax');
-    const redPixelAvg = document.getElementById('redPixelAvg');
 
     const bitRows = document.getElementById('bitRows');
     const bitRowsVal = document.getElementById('bitRowsVal');
-    const totalPositionsVal = document.getElementById('totalPositionsVal');
-    const expVal = document.getElementById('expVal');
-    const outerIsLsb = document.getElementById('outerIsLsb');
-    const sections = document.getElementById('sections');
-    const sectionsVal = document.getElementById('sectionsVal');
-    const centerAvg = document.getElementById('centerAvg');
-    const centerAvgVal = document.getElementById('centerAvgVal');
-    const groupGap = document.getElementById('groupGap');
-    const groupGapVal = document.getElementById('groupGapVal');
-    const maxNeighbor = document.getElementById('maxNeighbor');
-    const maxNeighborVal = document.getElementById('maxNeighborVal');
+    const whiteThreshold = document.getElementById('whiteThreshold');
+    const whiteThresholdVal = document.getElementById('whiteThresholdVal');
+    const blueMin = document.getElementById('blueMin');
+    const blueMinVal = document.getElementById('blueMinVal');
+    const blueDelta = document.getElementById('blueDelta');
+    const blueDeltaVal = document.getElementById('blueDeltaVal');
+    const minBlueWidth = document.getElementById('minBlueWidth');
+    const minBlueWidthVal = document.getElementById('minBlueWidthVal');
+    const sampleWidth = document.getElementById('sampleWidth');
+    const sampleWidthVal = document.getElementById('sampleWidthVal');
     const downscale = document.getElementById('downscale');
     const downscaleVal = document.getElementById('downscaleVal');
-    const enableIntersect = document.getElementById('enableIntersect');
-    const toggleControls = document.getElementById('toggleControls');
-    const controls = document.querySelector('.controls');
+    const invertBits = document.getElementById('invertBits');
+    const reverseTracks = document.getElementById('reverseTracks');
+
+    const angleDisplay = document.getElementById('angleDisplay');
+    const positionDisplay = document.getElementById('positionDisplay');
+    const bitsDisplay = document.getElementById('bitsDisplay');
+    const matchDisplay = document.getElementById('matchDisplay');
+    const confidenceDisplay = document.getElementById('confidenceDisplay');
+    const bandsDisplay = document.getElementById('bandsDisplay');
+    const stripDisplay = document.getElementById('stripDisplay');
 
     let stream = null;
     let animationId = null;
-    let detectedCenter = null;
-    let detectedRadii = [];
-    let redStats = { min: Infinity, max: 0, total: 0, frames: 0 };
-
-    function updateBitRowsLabel() {
-      const rows = parseInt(bitRows.value, 10);
-      bitRowsVal.textContent = rows;
-      expVal.textContent = rows;
-      const positions = 1 << rows;
-      totalPositionsVal.textContent = positions.toLocaleString();
-    }
 
     function updateLabels() {
-      sectionsVal.textContent = sections.value;
-      centerAvgVal.textContent = centerAvg.value;
-      groupGapVal.textContent = groupGap.value;
-      maxNeighborVal.textContent = maxNeighbor.value;
+      bitRowsVal.textContent = bitRows.value;
+      whiteThresholdVal.textContent = whiteThreshold.value;
+      blueMinVal.textContent = blueMin.value;
+      blueDeltaVal.textContent = blueDelta.value;
+      minBlueWidthVal.textContent = minBlueWidth.value;
+      sampleWidthVal.textContent = sampleWidth.value;
       downscaleVal.textContent = downscale.value;
     }
 
-    bitRows.addEventListener('input', updateBitRowsLabel);
-    sections.addEventListener('input', updateLabels);
-    centerAvg.addEventListener('input', updateLabels);
-    groupGap.addEventListener('input', updateLabels);
-    maxNeighbor.addEventListener('input', updateLabels);
-    downscale.addEventListener('input', updateLabels);
+    function setNA(message) {
+      angleDisplay.textContent = 'n/a';
+      positionDisplay.textContent = 'n/a';
+      bitsDisplay.textContent = 'n/a';
+      matchDisplay.textContent = 'n/a';
+      confidenceDisplay.textContent = 'n/a';
+      bandsDisplay.textContent = 'n/a';
+      stripDisplay.textContent = 'n/a';
+      statusText.textContent = message;
+    }
 
-    toggleControls.addEventListener('click', () => {
-      controls.classList.toggle('collapsed');
-      toggleControls.textContent = controls.classList.contains('collapsed') ? '+' : '−';
-    });
+    function isBluePixel(r, g, b) {
+      const min = parseInt(blueMin.value, 10);
+      const delta = parseInt(blueDelta.value, 10);
+      return b >= min && b - r >= delta && b - g >= delta;
+    }
 
-    function grayToBinary(gray) {
-      let binary = gray;
-      for (let i = 1; i < 32; i *= 2) {
-        binary ^= (binary >> i);
+    function brightnessAt(data, width, x, y) {
+      const idx = (y * width + x) * 4;
+      return (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+    }
+
+    function groupRuns(rowCounts, minCount) {
+      const groups = [];
+      let start = -1;
+      let total = 0;
+      let maxCount = 0;
+
+      for (let y = 0; y <= rowCounts.length; y++) {
+        const active = y < rowCounts.length && rowCounts[y] >= minCount;
+        if (active && start < 0) {
+          start = y;
+          total = 0;
+          maxCount = 0;
+        }
+        if (active) {
+          total += rowCounts[y];
+          maxCount = Math.max(maxCount, rowCounts[y]);
+        } else if (start >= 0) {
+          const end = y - 1;
+          groups.push({
+            start,
+            end,
+            center: (start + end) / 2,
+            height: end - start + 1,
+            total,
+            maxCount
+          });
+          start = -1;
+        }
       }
-      return binary;
+
+      return groups.filter((group) => group.height >= 2);
     }
 
-    function binaryToGray(num) {
-      return num ^ (num >> 1);
-    }
-
-    function detectBlueArcs(imageData, centerX, centerY) {
-      const arcs = [];
+    function findBlueBoundaryBands(imageData, x0, x1) {
+      const data = imageData.data;
       const width = imageData.width;
       const height = imageData.height;
-      const maxRadius = Math.min(centerX, centerY, width - centerX, height - centerY) - 10;
-      const blueThreshold = 100;
+      const rowCounts = new Array(height).fill(0);
 
-      const radiusStep = 2;
-      const samplesPerRadius = 180;
-
-      for (let radius = 20; radius < maxRadius; radius += radiusStep) {
-        let blueCount = 0;
-
-        for (let i = 0; i < samplesPerRadius; i++) {
-          const angle = (i / samplesPerRadius) * 2 * Math.PI;
-          const x = Math.round(centerX + radius * Math.cos(angle));
-          const y = Math.round(centerY + radius * Math.sin(angle));
-
-          if (x < 0 || x >= width || y < 0 || y >= height) continue;
-
+      for (let y = 0; y < height; y++) {
+        let count = 0;
+        for (let x = x0; x <= x1; x++) {
           const idx = (y * width + x) * 4;
-          const r = imageData.data[idx];
-          const g = imageData.data[idx + 1];
-          const b = imageData.data[idx + 2];
-
-          if (b > blueThreshold && b > r + 30 && b > g + 20) {
-            blueCount++;
-          }
+          if (isBluePixel(data[idx], data[idx + 1], data[idx + 2])) count++;
         }
-
-        const blueRatio = blueCount / samplesPerRadius;
-        if (blueRatio > 0.2) {
-          const tooClose = arcs.some(arc => Math.abs(arc.radius - radius) < 5);
-          if (!tooClose) {
-            arcs.push({ radius, centerX, centerY });
-          }
-        }
+        rowCounts[y] = count;
       }
 
-      return arcs.sort((a, b) => a.radius - b.radius);
-    }
+      const groups = groupRuns(rowCounts, parseInt(minBlueWidth.value, 10));
+      const midY = height / 2;
+      const above = groups
+        .filter((group) => group.center < midY)
+        .sort((a, b) => b.center - a.center)[0];
+      const below = groups
+        .filter((group) => group.center > midY)
+        .sort((a, b) => a.center - b.center)[0];
 
-    function findEncoderCenter(arcs, width, height) {
-      if (arcs.length === 0) {
-        return { cx: width / 2, cy: height / 2 };
+      if (above && below) return { upper: above, lower: below, groups, rowCounts };
+
+      const fallback = groups
+        .slice()
+        .sort((a, b) => b.maxCount - a.maxCount)
+        .slice(0, 2)
+        .sort((a, b) => a.center - b.center);
+      if (fallback.length === 2) {
+        return { upper: fallback[0], lower: fallback[1], groups, rowCounts };
       }
-
-      let sumX = 0, sumY = 0;
-      arcs.forEach(arc => {
-        sumX += arc.centerX;
-        sumY += arc.centerY;
-      });
-
-      return {
-        cx: sumX / arcs.length,
-        cy: sumY / arcs.length
-      };
+      return { upper: null, lower: null, groups, rowCounts };
     }
 
-    function readBitAtRadius(imageData, cx, cy, angle, radius) {
-      const x = Math.round(cx + radius * Math.cos(angle));
-      const y = Math.round(cy + radius * Math.sin(angle));
-
-      if (x < 0 || x >= imageData.width || y < 0 || y >= imageData.height) {
-        return null;
-      }
-
-      const idx = (y * imageData.width + x) * 4;
-      const r = imageData.data[idx];
-      const g = imageData.data[idx + 1];
-      const b = imageData.data[idx + 2];
-
-      const brightness = (r + g + b) / 3;
-      return brightness > 100 ? 1 : 0;
-    }
-
-    function readGrayCodeAlongRadial(imageData, cx, cy, angle, trackRadii) {
-      const bits = [];
-
-      for (let i = 0; i < trackRadii.length; i++) {
-        const radius = trackRadii[i];
-        const bit = readBitAtRadius(imageData, cx, cy, angle, radius);
-
-        if (bit !== null) {
-          bits.push(bit);
-        }
-      }
-
-      return bits;
-    }
-
-    function countRedPixels(imageData) {
+    function readBitsFromStrip(imageData, x0, x1, topY, bottomY, bands) {
       const data = imageData.data;
-      let count = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        if (r > 150 && r > g + 40 && r > b + 40) {
-          count++;
+      const width = imageData.width;
+      const threshold = parseInt(whiteThreshold.value, 10);
+      const bits = [];
+      const sections = [];
+      const confidences = [];
+
+      for (let i = 0; i < bands; i++) {
+        const yStart = Math.floor(topY + ((bottomY - topY) * i) / bands);
+        const yEnd = Math.floor(topY + ((bottomY - topY) * (i + 1)) / bands);
+        let total = 0;
+        let count = 0;
+        let white = 0;
+
+        for (let y = yStart; y < yEnd; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const idx = (y * width + x) * 4;
+            if (isBluePixel(data[idx], data[idx + 1], data[idx + 2])) continue;
+            const value = brightnessAt(data, width, x, y);
+            total += value;
+            count++;
+            if (value >= threshold) white++;
+          }
+        }
+
+        if (!count) return null;
+        const avg = total / count;
+        const bit = white / count >= 0.5 ? 1 : 0;
+        bits.push(invertBits.checked ? bit ^ 1 : bit);
+        const whiteRatio = white / count;
+        const confidence = Math.abs(whiteRatio - 0.5) * 2;
+        confidences.push(confidence);
+        sections.push({ yStart, yEnd, avg, whiteRatio, confidence });
+      }
+
+      const avgConfidence = confidences.reduce((sum, value) => sum + value, 0) / confidences.length;
+      const minConfidence = Math.min(...confidences);
+      return { bits, sections, avgConfidence, minConfidence, x0, x1 };
+    }
+
+    function findBestBitReading(imageData, searchX0, searchX1, topY, bottomY, bands) {
+      const searchWidth = searchX1 - searchX0 + 1;
+      const windowWidth = Math.max(4, Math.min(48, Math.round(searchWidth * 0.22)));
+      const step = Math.max(2, Math.round(windowWidth / 3));
+      let best = null;
+
+      for (let x0 = searchX0; x0 <= searchX1 - windowWidth + 1; x0 += step) {
+        const x1 = Math.min(searchX1, x0 + windowWidth - 1);
+        const reading = readBitsFromStrip(imageData, x0, x1, topY, bottomY, bands);
+        if (!reading) continue;
+        const score = reading.minConfidence * 0.65 + reading.avgConfidence * 0.35;
+        if (!best || score > best.score) {
+          best = { ...reading, score };
         }
       }
-      return count;
+
+      if (best) return best;
+      return readBitsFromStrip(imageData, searchX0, searchX1, topY, bottomY, bands);
+    }
+
+    function grayCode(value) {
+      return value ^ (value >> 1);
+    }
+
+    function grayBitsForPosition(position, bands) {
+      return grayCode(position).toString(2).padStart(bands, '0');
+    }
+
+    function hammingDistance(a, b) {
+      let distance = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) distance++;
+      }
+      return distance;
+    }
+
+    function matchGrayBits(bits) {
+      const normal = bits.join('');
+      const reversed = bits.slice().reverse().join('');
+      const candidates = [
+        { bits: normal, order: 'top-bottom' },
+        { bits: reversed, order: 'bottom-top' }
+      ];
+      const bands = bits.length;
+      const positions = 1 << bands;
+      let best = null;
+
+      for (const candidate of candidates) {
+        for (let position = 0; position < positions; position++) {
+          const expected = grayBitsForPosition(position, bands);
+          const distance = hammingDistance(candidate.bits, expected);
+          if (!best || distance < best.distance) {
+            best = {
+              bits: candidate.bits,
+              order: candidate.order,
+              expected,
+              position,
+              distance
+            };
+          }
+        }
+      }
+
+      best.maxPosition = positions - 1;
+      best.angle = (best.position / positions) * 360;
+      return best;
+    }
+
+    function drawOverlay(searchX0, searchX1, sampleX0, sampleX1, upper, lower, topY, bottomY, sections) {
+      ctx.save();
+
+      drawSearchStrip(searchX0, searchX1);
+
+      ctx.strokeStyle = 'rgba(255, 255, 0, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(searchX0, topY, searchX1 - searchX0, bottomY - topY);
+
+      ctx.fillStyle = 'rgba(0, 160, 255, 0.28)';
+      ctx.fillRect(searchX0, upper.start, searchX1 - searchX0, upper.height);
+      ctx.fillRect(searchX0, lower.start, searchX1 - searchX0, lower.height);
+
+      ctx.strokeStyle = 'rgba(0, 255, 120, 0.95)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sampleX0, topY, sampleX1 - sampleX0, bottomY - topY);
+
+      ctx.strokeStyle = 'rgba(255, 64, 64, 0.9)';
+      ctx.lineWidth = 1;
+      for (const section of sections) {
+        ctx.strokeRect(sampleX0, section.yStart, sampleX1 - sampleX0, section.yEnd - section.yStart);
+      }
+
+      ctx.restore();
+    }
+
+    function drawSearchStrip(x0, x1) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 255, 0, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x0, 0, x1 - x0, preview.height);
+      ctx.restore();
     }
 
     function processFrame() {
-      if (!stream) return;
+      if (!stream || !video.videoWidth || !video.videoHeight) return;
 
-      const desiredWidth = parseInt(downscale.value);
-      const scale = desiredWidth / video.videoWidth;
-      preview.width = desiredWidth;
-      preview.height = video.videoHeight * scale;
-
+      const targetWidth = parseInt(downscale.value, 10);
+      const scale = targetWidth / video.videoWidth;
+      preview.width = targetWidth;
+      preview.height = Math.round(video.videoHeight * scale);
       ctx.drawImage(video, 0, 0, preview.width, preview.height);
 
       const imageData = ctx.getImageData(0, 0, preview.width, preview.height);
-      const redCount = countRedPixels(imageData);
-      redStats.frames += 1;
-      redStats.total += redCount;
-      redStats.min = Math.min(redStats.min, redCount);
-      redStats.max = Math.max(redStats.max, redCount);
-      const avg = Math.round(redStats.total / redStats.frames);
+      const stripWidth = Math.max(4, Math.round(preview.width * (parseInt(sampleWidth.value, 10) / 100)));
+      const x0 = Math.max(0, Math.round((preview.width - stripWidth) / 2));
+      const x1 = Math.min(preview.width - 1, x0 + stripWidth);
+      const found = findBlueBoundaryBands(imageData, x0, x1);
 
-      redPixelCount.textContent = redCount.toLocaleString();
-      redPixelMin.textContent = redStats.min.toLocaleString();
-      redPixelMax.textContent = redStats.max.toLocaleString();
-      redPixelAvg.textContent = avg.toLocaleString();
-
-      const numSections = parseInt(sections.value);
-      const centerX = preview.width / 2;
-      const centerY = preview.height / 2;
-
-      const arcs = detectBlueArcs(imageData, centerX, centerY);
-
-      if (arcs.length > 0) {
-        detectedCenter = findEncoderCenter(arcs, preview.width, preview.height);
-
-        const desiredTracks = parseInt(bitRows.value);
-        detectedRadii = [];
-
-        for (let i = 0; i < arcs.length - 1 && detectedRadii.length < desiredTracks; i++) {
-          const midRadius = (arcs[i].radius + arcs[i + 1].radius) / 2;
-          detectedRadii.push(midRadius);
-        }
-
-        if (enableIntersect.checked) {
-          arcs.forEach(arc => {
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(detectedCenter.cx, detectedCenter.cy, arc.radius, 0, 2 * Math.PI);
-            ctx.stroke();
-          });
-        }
-
-        const angleSamples = Math.min(numSections, 36);
-        const readings = [];
-
-        for (let i = 0; i < angleSamples; i++) {
-          const angle = (i / angleSamples) * 2 * Math.PI;
-          const bits = readGrayCodeAlongRadial(
-            imageData,
-            detectedCenter.cx,
-            detectedCenter.cy,
-            angle,
-            detectedRadii
-          );
-
-          if (bits.length === desiredTracks) {
-            const orderedBits = outerIsLsb.checked ? bits.slice().reverse() : bits;
-
-            const grayValue = orderedBits.reduce((val, bit, idx) => {
-              return val | (bit << idx);
-            }, 0);
-
-            const position = grayToBinary(grayValue);
-            readings.push({ position, bits, angle });
-
-            if (enableIntersect.checked && i % 3 === 0) {
-              ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              ctx.moveTo(detectedCenter.cx, detectedCenter.cy);
-              ctx.lineTo(
-                detectedCenter.cx + Math.cos(angle) * (arcs[arcs.length - 1].radius + 20),
-                detectedCenter.cy + Math.sin(angle) * (arcs[arcs.length - 1].radius + 20)
-              );
-              ctx.stroke();
-            }
-          }
-        }
-
-        if (readings.length > 0) {
-          const positionCounts = {};
-          readings.forEach(r => {
-            positionCounts[r.position] = (positionCounts[r.position] || 0) + 1;
-          });
-
-          const mostCommon = Object.entries(positionCounts)
-            .sort((a, b) => b[1] - a[1])[0];
-
-          const finalPosition = parseInt(mostCommon[0], 10);
-          const maxPos = (1 << desiredTracks) - 1;
-          const angleDeg = (finalPosition / maxPos) * 360;
-
-          const exampleReading = readings.find(r => r.position === finalPosition);
-
-          angleDisplay.textContent = angleDeg.toFixed(1);
-          positionDisplay.textContent = `${finalPosition} / ${maxPos}`;
-          squareCount.textContent = readings.length;
-
-          if (exampleReading) {
-            let html = '<div style="font-weight:bold; margin-bottom:6px;">';
-            html += `${desiredTracks} bits → ${1 << desiredTracks} positions</div>`;
-            html += '<div class="col">Binary: ';
-            exampleReading.bits.forEach((bit) => {
-              html += bit;
-            });
-            html += '</div>';
-            html += `<div class="col">Position: ${finalPosition}</div>`;
-            html += `<div class="col">Angle: ${angleDeg.toFixed(1)}°</div>`;
-            binaryColumns.innerHTML = html;
-          }
-
-          statusText.textContent = `Reading encoder | ${arcs.length} tracks detected | ${readings.length} valid samples`;
-        } else {
-          statusText.textContent = `${arcs.length} blue arcs detected, waiting for valid readings...`;
-        }
-      } else {
-        statusText.textContent = 'Searching for blue arc boundaries...';
+      if (!found.upper || !found.lower) {
+        drawSearchStrip(x0, x1);
+        setNA(`Searching for two blue boundary bands in the center strip. Found ${found.groups.length}.`);
+        animationId = requestAnimationFrame(processFrame);
+        return;
       }
+
+      const trim = 2;
+      const topY = Math.min(preview.height - 1, found.upper.end + trim);
+      const bottomY = Math.max(0, found.lower.start - trim);
+      const bands = parseInt(bitRows.value, 10);
+
+      if (bottomY - topY < bands * 2) {
+        drawSearchStrip(x0, x1);
+        setNA('Blue bands found, but the usable strip between them is too small.');
+        animationId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      const reading = findBestBitReading(imageData, x0, x1, topY, bottomY, bands);
+      if (!reading) {
+        drawSearchStrip(x0, x1);
+        setNA('Blue bands found, but the bit strip did not have readable pixels.');
+        animationId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      const orderedBits = reverseTracks.checked ? reading.bits.slice().reverse() : reading.bits;
+      const best = matchGrayBits(orderedBits);
+      drawOverlay(x0, x1, reading.x0, reading.x1, found.upper, found.lower, topY, bottomY, reading.sections);
+
+      angleDisplay.textContent = `${best.angle.toFixed(2)} deg`;
+      positionDisplay.textContent = `${best.position} / ${best.maxPosition}`;
+      bitsDisplay.textContent = best.bits;
+      matchDisplay.textContent = reverseTracks.checked ? 'reverse tracks' : 'top-bottom';
+      confidenceDisplay.textContent = `${Math.round(reading.minConfidence * 100)}% min, ${Math.round(reading.avgConfidence * 100)}% avg`;
+      bandsDisplay.textContent = `${Math.round(found.upper.center)}, ${Math.round(found.lower.center)}`;
+      stripDisplay.textContent = `${bottomY - topY}px high, ${x1 - x0}px search, ${reading.x1 - reading.x0 + 1}px read`;
+      statusText.textContent = `Reading from the green sample window; red boxes show bit tracks.`;
 
       animationId = requestAnimationFrame(processFrame);
     }
@@ -545,23 +513,18 @@
           video: { width: 1280, height: 720, facingMode: 'environment' }
         });
         video.srcObject = stream;
-        video.play();
-
-        video.onloadedmetadata = () => {
-          startBtn.disabled = true;
-          stopBtn.disabled = false;
-          processFrame();
-        };
-
-        statusText.textContent = 'Camera started. Position encoder in view.';
+        await video.play();
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        processFrame();
       } catch (err) {
-        statusText.textContent = 'Error: ' + err.message;
+        setNA('Error: ' + err.message);
       }
     }
 
     function stopCamera() {
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
         stream = null;
       }
       if (animationId) {
@@ -571,19 +534,28 @@
       video.srcObject = null;
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      redStats = { min: Infinity, max: 0, total: 0, frames: 0 };
-      redPixelCount.textContent = '0';
-      redPixelMin.textContent = '0';
-      redPixelMax.textContent = '0';
-      redPixelAvg.textContent = '0';
-      statusText.textContent = 'Stopped.';
+      setNA('Stopped.');
     }
 
     startBtn.addEventListener('click', startCamera);
     stopBtn.addEventListener('click', stopCamera);
+    toggleControls.addEventListener('click', () => {
+      controls.classList.toggle('collapsed');
+      toggleControls.textContent = controls.classList.contains('collapsed') ? '+' : '-';
+    });
 
-    updateBitRowsLabel();
+    [
+      bitRows,
+      whiteThreshold,
+      blueMin,
+      blueDelta,
+      minBlueWidth,
+      sampleWidth,
+      downscale
+    ].forEach((input) => input.addEventListener('input', updateLabels));
+
     updateLabels();
+    setNA('Idle.');
   </script>
 </body>
 </html>

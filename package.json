@@ -4,6 +4,7 @@
   "description": "## Local server (HTTP)",
   "main": "update.js",
   "scripts": {
+    "predev": "node scripts/write-lan-dev-config.mjs",
     "dev": "vite --host 0.0.0.0 --port 5173",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
