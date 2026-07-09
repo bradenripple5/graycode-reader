@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HTML Files</title>
+  <title>Angle Reading Toolkit</title>
   <style>
     :root {
       color-scheme: light;
@@ -236,10 +236,59 @@
       }
     }
   </style>
+
+  <style id="home-widget-style">
+    .home-widget {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      z-index: 10000;
+      display: grid;
+      gap: 6px;
+      width: 104px;
+      padding: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.18);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.96);
+      color: #111111;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+      font: 700 12px Arial, sans-serif;
+      text-align: center;
+    }
+    .home-widget a {
+      color: #06436f;
+      text-decoration: none;
+    }
+    .home-widget a:hover {
+      text-decoration: underline;
+    }
+    .home-widget img {
+      display: block;
+      width: 88px;
+      height: 88px;
+      background: #ffffff;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+    @media print {
+      .home-widget {
+        position: fixed;
+        right: 0.12in;
+        top: 0.12in;
+        box-shadow: none;
+      }
+    }
+  </style>
 </head>
 <body>
-  <h1>HTML Files</h1>
-  <div class="hint">Click a file to open it. Use Versioning to compare snapshots.</div>
+  <div class="home-widget" id="homeWidget">
+    <a id="homeLink" href="./index.html">Home</a>
+    <a id="homeQrLink" href="./index.html" title="Open home page">
+      <img id="homeQr" alt="QR code for home page">
+    </a>
+  </div>
+  <h1>Angle Reading Toolkit</h1>
+  <div class="hint">Pattern and reader pages for visual angle/orientation experiments. Click a file to open it, or use Versioning to compare snapshots.</div>
   <div class="layout">
     <div class="panel">
       <div class="header-row">
@@ -295,7 +344,7 @@
         const link = document.createElement('a');
         link.className = 'file-link';
         const clean = path.replace(/^\.\//, '');
-        link.href = `/${clean}`;
+        link.href = `./${clean}`;
         link.textContent = clean;
         link.addEventListener('click', (event) => {
           if (versioningPanel && !versioningPanel.hasAttribute('hidden')) {
@@ -331,5 +380,50 @@
   </script>
   <script src="/vendor/diff.min.js"></script>
   <script type="module" src="/versioning.js"></script>
+
+  <script src="./vendor/qrcode.js"></script>
+  <script id="home-widget-script">
+    (function () {
+      const homeLink = document.getElementById('homeLink');
+      const homeQrLink = document.getElementById('homeQrLink');
+      const homeQr = document.getElementById('homeQr');
+      if (!homeLink || !homeQrLink || !homeQr) return;
+
+      function qrUrl(payload) {
+        if (typeof qrcode !== 'function') return '';
+        const qr = qrcode(0, 'M');
+        qr.addData(payload);
+        qr.make();
+        return qr.createDataURL(8, 4);
+      }
+
+      function isLocalHostName(hostname) {
+        return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname.endsWith('.local');
+      }
+
+      async function resolveHomeUrl() {
+        const url = new URL('./index.html', window.location.href);
+        if (!isLocalHostName(url.hostname)) return url.href;
+        try {
+          const res = await fetch('/__dev_lan_ip', { cache: 'no-store' });
+          if (!res.ok) return url.href;
+          const data = await res.json();
+          if (!data || !data.ip) return url.href;
+          const port = data.port ? ':' + data.port : '';
+          return (data.protocol || url.protocol) + '//' + data.ip + port + url.pathname;
+        } catch (err) {
+          return url.href;
+        }
+      }
+
+      resolveHomeUrl().then((homeUrl) => {
+        homeLink.href = homeUrl;
+        homeQrLink.href = homeUrl;
+        homeQrLink.title = homeUrl;
+        const src = qrUrl(homeUrl);
+        if (src) homeQr.src = src;
+      });
+    })();
+  </script>
 </body>
 </html>

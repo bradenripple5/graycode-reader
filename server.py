@@ -41,7 +41,11 @@ class HtmlIndexHandler(SimpleHTTPRequestHandler):
             self.wfile.write(_last_post.encode("utf-8"))
             return
 
-        if self.path not in ("/", "/index.html"):
+        if self.path == "/":
+            self.path = "/basic_fiducial_pattern.html"
+            return super().do_GET()
+
+        if self.path != "/index.html":
             return super().do_GET()
 
         html_files = sorted(
@@ -56,9 +60,10 @@ class HtmlIndexHandler(SimpleHTTPRequestHandler):
 
         body = ["<!doctype html>", "<html>", "<head>", "<meta charset=\"utf-8\">"]
         body.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
-        body.append("<title>HTML Files</title>")
+        body.append("<title>Angle Reading Toolkit</title>")
         body.append("</head><body>")
-        body.append("<h1>HTML Files</h1>")
+        body.append("<h1>Angle Reading Toolkit</h1>")
+        body.append("<p>Pattern and reader pages for visual angle/orientation experiments.</p>")
         if html_files:
             body.append("<ul>")
             for path in html_files:

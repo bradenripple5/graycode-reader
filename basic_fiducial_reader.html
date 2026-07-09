@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Basic Fiducial Reader</title>
+  <script>
+    window.arucoScriptStatus = { cv: 'pending', aruco: 'pending' };
+  </script>
+  <script src="./vendor/js-aruco/cv.js" onload="window.arucoScriptStatus.cv='loaded'" onerror="window.arucoScriptStatus.cv='error'"></script>
+  <script src="./vendor/js-aruco/aruco.js" onload="window.arucoScriptStatus.aruco='loaded'" onerror="window.arucoScriptStatus.aruco='error'"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #17191c;
+      color: #f2f2f2;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: minmax(270px, 350px) 1fr;
+      min-height: 100vh;
+    }
+    aside {
+      padding: 18px;
+      background: #24282d;
+      border-right: 1px solid #383d44;
+    }
+    h1 { margin: 0 0 14px; font-size: 22px; }
+    .controls { display: grid; gap: 12px; }
+    button {
+      min-height: 40px;
+      border: 0;
+      border-radius: 4px;
+      background: #2c7be5;
+      color: #ffffff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:disabled { background: #6b7280; cursor: not-allowed; }
+    label {
+      display: grid;
+      gap: 5px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    input[type="range"] { width: 100%; }
+    .readout {
+      display: grid;
+      gap: 7px;
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 4px;
+      background: #101317;
+      color: #a6d5ff;
+      font: 700 14px "Courier New", monospace;
+    }
+    .status {
+      margin-top: 12px;
+      color: #d4d4d4;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .stage {
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      overflow: auto;
+    }
+    canvas {
+      display: block;
+      width: min(100%, 960px);
+      height: auto;
+      background: #050505;
+      border: 1px solid #363b42;
+      border-radius: 6px;
+    }
+    video { display: none; }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      aside {
+        border-right: 0;
+        border-bottom: 1px solid #383d44;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside>
+      <h1>Basic Fiducial Reader</h1>
+      <div class="controls">
+        <button id="startBtn">Start Camera</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <label>
+          Downscale width: <span id="downscaleVal">320</span>
+          <input id="downscale" type="range" min="240" max="1280" value="320" step="20">
+        </label>
+        <label>
+          Scan rate: <span id="scanRateVal">12</span> fps
+          <input id="scanRate" type="range" min="1" max="30" value="12" step="1">
+        </label>
+        <label>
+          Simple crosses
+          <input id="simpleCrossMode" type="checkbox" checked>
+        </label>
+        <label>
+          Expected pairs: <span id="expectedPairsVal">10</span>
+          <input id="expectedPairs" type="range" min="1" max="20" value="10" step="1">
+        </label>
+      </div>
+      <div class="readout">
+        <div>Center: <span id="centerDisplay">n/a</span></div>
+        <div>Angle: <span id="angleDisplay">n/a</span></div>
+        <div>Markers: <span id="markerDisplay">n/a</span></div>
+        <div>Scan: <span id="scanDisplay">n/a</span></div>
+      </div>
+      <div class="status" id="statusText">Open the basic fiducial pattern, point the camera at it, then start.</div>
+    </aside>
+    <section class="stage">
+      <video id="video" playsinline></video>
+      <canvas id="preview"></canvas>
+    </section>
+  </main>
+  <script>
+    const video = document.getElementById('video');
+    const preview = document.getElementById('preview');
+    const ctx = preview.getContext('2d', { willReadFrequently: true });
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const downscale = document.getElementById('downscale');
+    const scanRate = document.getElementById('scanRate');
+    const simpleCrossMode = document.getElementById('simpleCrossMode');
+    const expectedPairs = document.getElementById('expectedPairs');
+    const expectedPairsVal = document.getElementById('expectedPairsVal');
+    const downscaleVal = document.getElementById('downscaleVal');
+    const scanRateVal = document.getElementById('scanRateVal');
+    const centerDisplay = document.getElementById('centerDisplay');
+    const angleDisplay = document.getElementById('angleDisplay');
+    const markerDisplay = document.getElementById('markerDisplay');
+    const scanDisplay = document.getElementById('scanDisplay');
+    const statusText = document.getElementById('statusText');
+    let stream = null;
+    let timerId = null;
+    let scanCount = 0;
+    let detector = null;
+    const angleSlotCount = 20;
+    function markerCenter(marker) {
+      return {
+        x: marker.corners.reduce((sum, point) => sum + point.x, 0) / marker.corners.length,
+        y: marker.corners.reduce((sum, point) => sum + point.y, 0) / marker.corners.length
+      };
+    }
+    function markerArea(marker) {
+      let area = 0;
+      for (let i = 0; i < marker.corners.length; i++) {
+        const a = marker.corners[i];
+        const b = marker.corners[(i + 1) % marker.corners.length];
+        area += a.x * b.y - b.x * a.y;
+      }
+      return Math.abs(area) / 2;
+    }
+    function pairColor(index, total) {
+      return `hsl(${Math.round((index / Math.max(1, total)) * 360)}, 95%, 55%)`;
+    }
+    function drawCross(center, color, size = 12) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(center.x - size, center.y);
+      ctx.lineTo(center.x + size, center.y);
+      ctx.moveTo(center.x, center.y - size);
+      ctx.lineTo(center.x, center.y + size);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Draws a line from `from` to `to` with a small arrowhead at `to`,
+    // so the pairing direction (inner -> outer) is visible at a glance.
+    function drawVector(from, to, color, lineWidth = 4) {
+      const angleRad = Math.atan2(to.y - from.y, to.x - from.x);
+      const headLen = 14;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(to.x, to.y);
+      ctx.lineTo(
+        to.x - headLen * Math.cos(angleRad - Math.PI / 7),
+        to.y - headLen * Math.sin(angleRad - Math.PI / 7)
+      );
+      ctx.lineTo(
+        to.x - headLen * Math.cos(angleRad + Math.PI / 7),
+        to.y - headLen * Math.sin(angleRad + Math.PI / 7)
+      );
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    // Pairing rule matches the generator: inner id = slot*2+1, outer id = slot*2+2.
+    // So any odd id's partner is id+1, and any even id's partner is id-1.
+    function pairPartnerId(id) {
+      return id % 2 === 1 ? id + 1 : id - 1;
+    }
+    function normalizeDeg(value) {
+      return ((value % 360) + 360) % 360;
+    }
+    // Finds the pair vector closest to fixed viewer-up (0, -1), computes a
+    // signed angular offset with atan2(cross(up, pairVector), dot(up, pairVector)),
+    // then adds that measured offset to the pair's fixed ID-derived label angle.
+    function computeUpValue(pairs, expectedTotal) {
+      const closest = pairs
+        .map((pair) => {
+          const dx = pair.outerCenter.x - pair.innerCenter.x;
+          const dy = pair.outerCenter.y - pair.innerCenter.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 1e-9) return null;
+          const dot = -dy;
+          const cross = -dx;
+          const cosine = Math.max(-1, Math.min(1, dot / len));
+          return {
+            pair,
+            cosine,
+            fixedAngle: pairFixedAngle(pair, expectedTotal),
+            offset: Math.atan2(cross, dot) * 180 / Math.PI
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.cosine - a.cosine)[0];
+      return closest ? normalizeDeg(closest.fixedAngle + closest.offset) : null;
+    }
+    // Draws a fixed, always-vertical arrow from `anchor`. Its label is the
+    // closest pair's fixed label angle plus atan2(cross, dot) from viewer-up.
+    function drawUpIndicator(anchor, labelAngleDeg, length = 100) {
+      const tip = { x: anchor.x, y: anchor.y - length };
+      const color = '#ffd60a';
+      drawVector(anchor, tip, color, 5);
+      const text = labelAngleDeg === null ? 'up: n/a' : `up: ${labelAngleDeg.toFixed(1)}\u00b0`;
+      drawLabel(text, { x: tip.x, y: tip.y - 16 }, color);
+    }
+    function fixedUpIndicatorAnchor() {
+      return {
+        x: preview.width / 2,
+        y: preview.height * 0.25
+      };
+    }
+    // The generator distributes pairs evenly, but keeps marker IDs mapped to
+    // slots via floor(i * 20 / N). This recovers i from the detected slot so
+    // labels and angle math use the same evenly-spaced frame as the pattern.
+    function slotToEvenIndex(slot, total) {
+      for (let i = 0; i < total; i++) {
+        if (Math.floor((i * angleSlotCount) / total) === slot) return i;
+      }
+      return null;
+    }
+    function pairFixedAngle(pair, total) {
+      const evenIndex = slotToEvenIndex(pair.index, total);
+      return evenIndex === null
+        ? pair.expectedAngle
+        : normalizeDeg((evenIndex / total) * 360);
+    }
+    // Draws a small pill-background label centered at a point -- used to
+    // overlay each pair's evenly-spaced angle above its vector.
+    function drawLabel(text, point, color) {
+      ctx.save();
+      ctx.font = '600 15px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const paddingX = 6;
+      const paddingY = 3;
+      const metrics = ctx.measureText(text);
+      const boxWidth = metrics.width + paddingX * 2;
+      const boxHeight = 18 + paddingY * 2;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+      ctx.fillRect(point.x - boxWidth / 2, point.y - boxHeight / 2, boxWidth, boxHeight);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(point.x - boxWidth / 2, point.y - boxHeight / 2, boxWidth, boxHeight);
+      ctx.fillStyle = color;
+      ctx.fillText(text, point.x, point.y + 1);
+      ctx.restore();
+    }
+    // Groups visible markers into complete inner/outer pairs. The slot is
+    // embedded in IDs: inner id = slot*2+1, outer id = slot*2+2.
+    function findMarkerPairs(markers) {
+      const byId = new Map(markers.map((m) => [m.id, m]));
+      const claimed = new Set();
+      const pairs = [];
+      for (const marker of markers) {
+        if (claimed.has(marker.id)) continue;
+        const partnerId = pairPartnerId(marker.id);
+        const partner = byId.get(partnerId);
+        if (!partner || claimed.has(partnerId) || partner.id === marker.id) continue;
+        claimed.add(marker.id);
+        claimed.add(partnerId);
+        const isOddFirst = marker.id % 2 === 1;
+        const inner = isOddFirst ? marker : partner;
+        const outer = isOddFirst ? partner : marker;
+        const innerCenter = markerCenter(inner);
+        const outerCenter = markerCenter(outer);
+        const slot = Math.floor((inner.id - 1) / 2);
+        const expectedAngle = normalizeDeg((slot / angleSlotCount) * 360);
+        pairs.push({
+          index: slot,
+          inner,
+          outer,
+          innerCenter,
+          outerCenter,
+          expectedAngle
+        });
+      }
+      pairs.sort((a, b) => a.index - b.index);
+      return pairs;
+    }
+    function estimateRingPairs(markers) {
+      const normalizeDeg = (value) => ((value % 360) + 360) % 360;
+      const byId = new Map(markers.map((marker) => [marker.id, marker]));
+      const foundPairs = [];
+      for (const marker of markers) {
+        if (marker.id < 2 || marker.id % 2 !== 0) continue;
+        const inner = byId.get(marker.id - 1);
+        const outer = marker;
+        if (!inner || !outer) continue;
+        const slot = (marker.id / 2) - 1;
+        const innerCenter = markerCenter(inner);
+        const outerCenter = markerCenter(outer);
+        foundPairs.push({
+          index: slot,
+          inner,
+          outer,
+          innerCenter,
+          outerCenter,
+          expectedAngle: normalizeDeg((slot / angleSlotCount) * 360)
+        });
+      }
+      if (!foundPairs.length) return null;
+      foundPairs.sort((a, b) => a.index - b.index);
+      const center = foundPairs.reduce((acc, pair) => {
+        acc.x += (pair.innerCenter.x + pair.outerCenter.x) / 2;
+        acc.y += (pair.innerCenter.y + pair.outerCenter.y) / 2;
+        return acc;
+      }, { x: 0, y: 0 });
+      center.x /= foundPairs.length;
+      center.y /= foundPairs.length;
+      return { center, pairs: foundPairs };
+    }
+    function drawRingFit(fit) {
+      if (!fit) return;
+      const pairTotal = Math.max(...fit.pairs.map((pair) => pair.index)) + 1;
+      ctx.save();
+      for (const pair of fit.pairs) {
+        const color = pairColor(pair.index, pairTotal);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(pair.innerCenter.x, pair.innerCenter.y);
+        ctx.lineTo(pair.outerCenter.x, pair.outerCenter.y);
+        ctx.stroke();
+        drawCross(pair.innerCenter, color, 13);
+        drawCross(pair.outerCenter, color, 13);
+      }
+      ctx.restore();
+    }
+    function processFrame() {
+      if (!stream || !video.videoWidth || !video.videoHeight) return;
+      scanCount++;
+      const start = performance.now();
+      const targetWidth = parseInt(downscale.value, 10);
+      const scale = targetWidth / video.videoWidth;
+      preview.width = targetWidth;
+      preview.height = Math.round(video.videoHeight * scale);
+      ctx.drawImage(video, 0, 0, preview.width, preview.height);
+      if (!window.AR || !window.CV) {
+        const status = window.arucoScriptStatus || {};
+        centerDisplay.textContent = 'n/a';
+        angleDisplay.textContent = 'n/a';
+        markerDisplay.textContent = '0';
+        statusText.textContent = `js-aruco did not load (cv=${status.cv || 'unknown'}, aruco=${status.aruco || 'unknown'}).`;
+        scanDisplay.textContent = `#${scanCount}, 0 ms @ ${preview.width}x${preview.height}`;
+        timerId = window.setTimeout(processFrame, Math.round(1000 / Math.max(1, parseInt(scanRate.value, 10))));
+        return;
+      }
+      if (!detector) detector = new AR.Detector();
+      const imageData = ctx.getImageData(0, 0, preview.width, preview.height);
+      const markers = detector.detect(imageData).sort((a, b) => markerArea(b) - markerArea(a));
+      const scanMs = Math.round(performance.now() - start);
+      if (!markers.length) {
+        centerDisplay.textContent = 'n/a';
+        angleDisplay.textContent = 'n/a';
+        markerDisplay.textContent = '0';
+        statusText.textContent = 'Searching for js-aruco marker.';
+      } else {
+        if (simpleCrossMode.checked) {
+          const centers = markers.map(markerCenter);
+          const pairs = findMarkerPairs(markers);
+          const expectedTotal = parseInt(expectedPairs.value, 10);
+          const claimedIds = new Set();
+          for (const pair of pairs) {
+            claimedIds.add(pair.inner.id);
+            claimedIds.add(pair.outer.id);
+          }
+          // Unpaired markers (partner not currently in view) just get a plain green cross.
+          markers.forEach((marker, i) => {
+            if (!claimedIds.has(marker.id)) drawCross(centers[i], '#00e676', 12);
+          });
+          // Paired markers get a colored vector from inner -> outer, plus matching crosses.
+          // Color is keyed off the fixed 20-slot layout (not how many are visible right
+          // now), so a given pair keeps the same color across frames.
+          pairs.forEach((pair) => {
+            const color = pairColor(pair.index, angleSlotCount);
+            drawVector(pair.innerCenter, pair.outerCenter, color, 4);
+            drawCross(pair.innerCenter, color, 12);
+            drawCross(pair.outerCenter, color, 12);
+            // Evenly-spaced angle: invert slot -> sequence index using the
+            // expected total, then space that index evenly around 360deg,
+            // rather than using the raw (possibly uneven) slot/20 angle.
+            // Evenly-spaced *identity* for this pair (which slot it nominally
+            // occupies), used only to flag if the current N doesn't match
+            // what's actually printed -- not used for the displayed angle,
+            // since that needs to be the vector's real live direction to sit
+            // on the same frame as the "up" arrow's label.
+            const evenIndex = slotToEvenIndex(pair.index, expectedTotal);
+            const fixedAngle = pairFixedAngle(pair, expectedTotal);
+            const mismatchSuffix = evenIndex === null ? ' (check N)' : '';
+            const midpoint = {
+              x: (pair.innerCenter.x + pair.outerCenter.x) / 2,
+              y: (pair.innerCenter.y + pair.outerCenter.y) / 2
+            };
+            // Offset the label perpendicular to the vector so it sits "above"
+            // it rather than directly on top of the line.
+            const dx = pair.outerCenter.x - pair.innerCenter.x;
+            const dy = pair.outerCenter.y - pair.innerCenter.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const labelPoint = {
+              x: midpoint.x - (dy / len) * 22,
+              y: midpoint.y + (dx / len) * 22
+            };
+            const labelText = fixedAngle === null
+              ? `#${pair.index}${mismatchSuffix}`
+              : `${fixedAngle.toFixed(1)}\u00b0${mismatchSuffix}`;
+            drawLabel(labelText, labelPoint, color);
+          });
+          const upAngle = computeUpValue(pairs, expectedTotal);
+          if (upAngle !== null) {
+            drawUpIndicator(fixedUpIndicatorAnchor(), upAngle);
+          }
+          const first = centers[0];
+          centerDisplay.textContent = `${first.x.toFixed(1)}, ${first.y.toFixed(1)}`;
+          angleDisplay.textContent = upAngle === null ? 'n/a' : `${upAngle.toFixed(2)} deg from viewer-up`;
+          markerDisplay.textContent = `${pairs.length}/${expectedTotal} pairs: ${markers.map((marker) => `#${marker.id}`).join(', ')}`;
+          statusText.textContent = pairs.length
+            ? `Simple mode: fixed yellow arrow points viewer-up; angle = fixed closest-pair label + atan2(cross, dot).`
+            : `Simple mode: ${markers.length} code(s) detected, but no matching pair (id and id\u00b11) is in view yet.`;
+        } else {
+          const fit = estimateRingPairs(markers);
+          drawRingFit(fit);
+          if (fit) {
+            const expectedTotal = parseInt(expectedPairs.value, 10);
+            const upAngle = computeUpValue(fit.pairs, expectedTotal);
+            drawUpIndicator(fixedUpIndicatorAnchor(), upAngle);
+            centerDisplay.textContent = `${fit.center.x.toFixed(1)}, ${fit.center.y.toFixed(1)}`;
+            angleDisplay.textContent = upAngle === null ? 'n/a' : `${upAngle.toFixed(2)} deg from viewer-up`;
+            markerDisplay.textContent = `${fit.pairs.length} pairs: ${fit.pairs.map((pair) => `#${pair.inner.id}/#${pair.outer.id}`).join(', ')}`;
+            statusText.textContent = `Fixed yellow arrow points viewer-up; angle = fixed closest-pair label + atan2(cross, dot).`;
+          } else {
+            centerDisplay.textContent = 'n/a';
+            angleDisplay.textContent = 'n/a';
+            markerDisplay.textContent = `0 pairs; seen ${markers.map((marker) => `#${marker.id}`).join(', ')}`;
+            statusText.textContent = 'Detected markers, but no odd/even inner/outer pair was found.';
+          }
+        }
+      }
+      scanDisplay.textContent = `#${scanCount}, ${scanMs} ms @ ${preview.width}x${preview.height}`;
+      timerId = window.setTimeout(processFrame, Math.round(1000 / Math.max(1, parseInt(scanRate.value, 10))));
+    }
+    async function startCamera() {
+      if (stream) return;
+      try {
+        statusText.textContent = 'Starting camera...';
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        statusText.textContent = 'Camera running.';
+        processFrame();
+      } catch (err) {
+        statusText.textContent = `Camera error: ${err.message}`;
+      }
+    }
+    function stopCamera() {
+      if (timerId) window.clearTimeout(timerId);
+      timerId = null;
+      if (stream) {
+        for (const track of stream.getTracks()) track.stop();
+      }
+      stream = null;
+      video.srcObject = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusText.textContent = 'Camera stopped.';
+    }
+    function updateLabels() {
+      downscaleVal.textContent = downscale.value;
+      scanRateVal.textContent = scanRate.value;
+      expectedPairsVal.textContent = expectedPairs.value;
+    }
+    startBtn.addEventListener('click', startCamera);
+    stopBtn.addEventListener('click', stopCamera);
+    for (const input of [downscale, scanRate, expectedPairs]) input.addEventListener('input', updateLabels);
+    updateLabels();
+    window.addEventListener('load', startCamera);
+  </script>
+</body>
+</html>

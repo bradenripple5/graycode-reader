@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Basic Fiducial Pattern</title>
+  <script src="./vendor/js-aruco/aruco.js"></script>
+  <script src="./vendor/qrcode.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(240px, 320px) 1fr;
+      font-family: Arial, sans-serif;
+      background: #202124;
+      color: #161616;
+    }
+    aside {
+      padding: 18px;
+      background: #ffffff;
+      border-right: 1px solid #d8d8d8;
+    }
+    h1 { margin: 0 0 14px; font-size: 22px; }
+    label {
+      display: grid;
+      gap: 5px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    input[type="range"] { width: 100%; }
+    button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 4px;
+      background: #1769aa;
+      color: #ffffff;
+      font-size: 14px;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    button.secondary {
+      background: #ffffff;
+      color: #1769aa;
+      border: 2px solid #1769aa;
+    }
+    button.animating {
+      background: #b3261e;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .readout {
+      margin-top: 14px;
+      padding: 10px;
+      border-radius: 4px;
+      background: #f1f7ff;
+      color: #06436f;
+      font: 700 13px "Courier New", monospace;
+      white-space: pre-line;
+    }
+    .stage {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      overflow: auto;
+    }
+    .stage-content {
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+    }
+    .pattern-intro {
+      width: min(88vmin + 178px, 998px);
+      color: #ffffff;
+    }
+    .pattern-intro h2 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+    .pattern-intro p {
+      max-width: 820px;
+      margin: 0;
+      color: #d7dce2;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .pattern-intro a {
+      display: inline-block;
+      margin-top: 9px;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .pattern-layout {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 18px;
+    }
+    canvas {
+      width: min(88vmin, 820px);
+      height: min(88vmin, 820px);
+      background: #ffffff;
+      box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+    }
+    .reader-qr-card {
+      width: 160px;
+      padding: 10px;
+      border: 1px solid #d7dce2;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #1d1f22;
+      text-decoration: none;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+    }
+    .reader-qr-title {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .reader-qr-card img {
+      display: block;
+      width: 138px;
+      height: 138px;
+      image-rendering: pixelated;
+    }
+    .reader-qr-note {
+      display: block;
+      margin-top: 7px;
+      font-size: 11px;
+      line-height: 1.25;
+      color: #4d535a;
+    }
+    .print-copies {
+      display: none;
+    }
+    @media (max-width: 860px) {
+      .pattern-layout {
+        flex-direction: column;
+        align-items: center;
+      }
+      .reader-qr-card {
+        width: min(88vmin, 820px);
+      }
+      .reader-qr-card img {
+        width: 128px;
+        height: 128px;
+      }
+    }
+    @media print {
+      body { display: block; background: #ffffff; }
+      aside { display: none; }
+      .stage { padding: 0; }
+      .stage-content { display: block; }
+      .pattern-intro { display: none; }
+      .pattern-layout { display: block; }
+      .reader-qr-card { display: none; }
+      .print-copies { display: none; }
+      canvas {
+        width: 100vmin;
+        height: 100vmin;
+        box-shadow: none;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+      body.print-four .pattern-layout {
+        display: none;
+      }
+      body.print-four .print-copies {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.12in;
+        place-items: center;
+      }
+      body.print-four .print-copies img {
+        display: block;
+        width: 48vmin;
+        height: 48vmin;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>Basic Fiducial Pattern</h1>
+    <label>
+      Marker size: <span id="sizeVal">8</span>%
+      <input id="markerSize" type="range" min="5" max="22" value="8" step="1">
+    </label>
+    <label>
+      Ring pairs: <span id="pairVal">19</span>
+      <input id="pairCount" type="range" min="10" max="20" value="19" step="1">
+    </label>
+    <label>
+      Inner radius: <span id="innerRadiusVal">15</span>%
+      <input id="innerRadius" type="range" min="8" max="33" value="15" step="1">
+    </label>
+    <label>
+      Outer spacing: <span id="ringSeparationVal">8</span>%
+      <input id="ringSeparation" type="range" min="5" max="20" value="8" step="1">
+    </label>
+    <label>
+      Rotation: <span id="angleVal">0</span> deg
+      <input id="angle" type="range" min="0" max="359" value="0" step="1">
+    </label>
+    <label>
+      Spin speed: <span id="speedVal">5</span> deg/s
+      <input id="speed" type="range" min="-180" max="180" value="5" step="1">
+    </label>
+    <label>
+      Angle labels
+      <select id="angleLabelMode">
+        <option value="pi">Pi ratios</option>
+        <option value="degrees" selected>Degrees</option>
+        <option value="none">Hidden</option>
+      </select>
+    </label>
+    <label>
+      Print 4-up if size allows
+      <input id="printFour" type="checkbox" checked>
+    </label>
+    <label>
+      Show cut circle
+      <input id="showCutCircle" type="checkbox" checked>
+    </label>
+    <div class="row">
+      <button id="animateBtn">▶ Animate</button>
+      <button id="printBtn" class="secondary">Print</button>
+    </div>
+    <div class="readout" id="readout"></div>
+  </aside>
+  <section class="stage">
+    <div class="stage-content">
+      <div class="pattern-intro">
+        <h2>ArUco Pair Angle Wheel</h2>
+        <p>
+          This pattern uses paired ArUco fiducial markers as visual angle references.
+          The reader detects marker IDs and corners, pairs each inner marker with its
+          matching outer marker, draws a vector between them, and uses that vector plus
+          the pair's fixed angle label to estimate which way is up in the camera view.
+        </p>
+        <a href="./index.html">Home: Angle Reading Toolkit</a>
+      </div>
+      <div class="pattern-layout">
+        <canvas id="pattern" width="900" height="900"></canvas>
+        <a id="readerQrLink" class="reader-qr-card" href="./basic_fiducial_reader.html" title="Open basic fiducial reader">
+          <span class="reader-qr-title">Reader QR</span>
+          <img id="readerQr" alt="QR code for the basic fiducial reader">
+          <span class="reader-qr-note">Scan this to open the camera reader for this ArUco pair wheel.</span>
+        </a>
+      </div>
+      <div id="printCopies" class="print-copies" aria-hidden="true">
+        <img alt="Printable ArUco pair wheel copy 1">
+        <img alt="Printable ArUco pair wheel copy 2">
+        <img alt="Printable ArUco pair wheel copy 3">
+        <img alt="Printable ArUco pair wheel copy 4">
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const canvas = document.getElementById('pattern');
+    const ctx = canvas.getContext('2d');
+    const markerSize = document.getElementById('markerSize');
+    const sizeVal = document.getElementById('sizeVal');
+    const pairCount = document.getElementById('pairCount');
+    const pairVal = document.getElementById('pairVal');
+    const innerRadiusSlider = document.getElementById('innerRadius');
+    const innerRadiusVal = document.getElementById('innerRadiusVal');
+    const ringSeparation = document.getElementById('ringSeparation');
+    const ringSeparationVal = document.getElementById('ringSeparationVal');
+    const angle = document.getElementById('angle');
+    const angleVal = document.getElementById('angleVal');
+    const speed = document.getElementById('speed');
+    const speedVal = document.getElementById('speedVal');
+    const angleLabelMode = document.getElementById('angleLabelMode');
+    const printFour = document.getElementById('printFour');
+    const showCutCircle = document.getElementById('showCutCircle');
+    const printCopies = document.getElementById('printCopies');
+    const printBtn = document.getElementById('printBtn');
+    const animateBtn = document.getElementById('animateBtn');
+    const readout = document.getElementById('readout');
+    const readerQrLink = document.getElementById('readerQrLink');
+    const readerQr = document.getElementById('readerQr');
+    const angleSlotCount = 20;
+    const markerGapFraction = 0.40;
+    const maxOuterRadiusPct = 48;
+
+    let animating = false;
+    let rafId = null;
+    let lastTs = null;
+    let angleDegFloat = parseInt(angle.value, 10);
+    let detectedReaderUrl = null;
+    let lastCutRadius = canvas.width / 2 - 42;
+
+    function githubPagesReaderUrl() {
+      return new URL('basic_fiducial_reader.html', window.location.href).href;
+    }
+
+    function isGithubPagesHost() {
+      return window.location.hostname.endsWith('.github.io');
+    }
+
+    function readerUrl() {
+      if (isGithubPagesHost()) return githubPagesReaderUrl();
+      return detectedReaderUrl || `${window.location.origin}/basic_fiducial_reader.html`;
+    }
+
+    async function updateReaderUrlFromLanConfig() {
+      if (isGithubPagesHost()) return;
+      try {
+        const res = await fetch('/__dev_lan_ip', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !data.ip) return;
+        const protocol = data.protocol || window.location.protocol;
+        const port = data.port ? `:${data.port}` : '';
+        detectedReaderUrl = `${protocol}//${data.ip}${port}/basic_fiducial_reader.html`;
+        render();
+      } catch (err) {
+        // Keep the pattern usable when opened without the Vite LAN endpoint.
+      }
+    }
+
+    function qrDataUrl(payload) {
+      if (typeof qrcode !== 'function') return '';
+      const qr = qrcode(0, 'M');
+      qr.addData(payload);
+      qr.make();
+      return qr.createDataURL(6, 4);
+    }
+
+    function updateReaderQr() {
+      const url = readerUrl();
+      readerQrLink.href = url;
+      readerQrLink.title = url;
+      const src = qrDataUrl(url);
+      if (src) readerQr.src = src;
+    }
+
+    function gcd(a, b) {
+      while (b !== 0) {
+        const next = a % b;
+        a = b;
+        b = next;
+      }
+      return Math.abs(a);
+    }
+
+    function piRatioLabel(index, total) {
+      const divisor = gcd(index * 2, total);
+      const numerator = (index * 2) / divisor;
+      const denominator = total / divisor;
+      if (numerator === 0) return '0';
+      if (denominator === 1) return numerator === 1 ? 'π' : `${numerator}π`;
+      return numerator === 1 ? `π/${denominator}` : `${numerator}π/${denominator}`;
+    }
+
+    function angleLabel(index, total) {
+      if (angleLabelMode.value === 'none') return '';
+      if (angleLabelMode.value === 'degrees') return `${Math.round((index / total) * 360)}°`;
+      return piRatioLabel(index, total);
+    }
+
+    function drawPairAngleLabel(index, total, theta, outerRadius, markerSizePx) {
+      const label = angleLabel(index, total);
+      if (!label) return;
+      const labelRadius = Math.min(outerRadius + markerSizePx * 0.9, canvas.width / 2 - 70);
+
+      ctx.save();
+      ctx.translate(Math.cos(theta) * labelRadius, Math.sin(theta) * labelRadius);
+      ctx.rotate(theta + Math.PI / 2);
+      ctx.font = '700 18px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#111111';
+      ctx.fillText(label, 0, 1);
+      ctx.restore();
+    }
+
+    function markerSizeForSpacing(requestedSize, pairs, innerRadius, outerRadius) {
+      const gapScale = 1 + markerGapFraction;
+      const innerChord = 2 * innerRadius * Math.sin(Math.PI / pairs);
+      const outerChord = 2 * outerRadius * Math.sin(Math.PI / pairs);
+      const radialDistance = outerRadius - innerRadius;
+      const ringLimitedSize = Math.min(innerChord, outerChord) / gapScale;
+      const radialLimitedSize = radialDistance / gapScale;
+      const canvasLimitedSize = (canvas.width / 2 - outerRadius) * 2;
+      return Math.max(1, Math.min(
+        requestedSize,
+        ringLimitedSize,
+        radialLimitedSize,
+        canvasLimitedSize
+      ));
+    }
+
+    function drawBottomRuler() {
+      const cssPixelsPerInch = 96;
+      const scale = canvas.width / canvas.getBoundingClientRect().width;
+      const pixelsPerInch = cssPixelsPerInch * scale;
+      const margin = 56;
+      const y = canvas.height - 34;
+      const width = canvas.width - margin * 2;
+      const inches = Math.max(1, Math.floor(width / pixelsPerInch));
+
+      ctx.save();
+      ctx.strokeStyle = '#111111';
+      ctx.fillStyle = '#111111';
+      ctx.lineWidth = 2;
+      ctx.font = '700 13px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.beginPath();
+      ctx.moveTo(margin, y);
+      ctx.lineTo(margin + inches * pixelsPerInch, y);
+      ctx.stroke();
+      for (let i = 0; i <= inches * 4; i++) {
+        const x = margin + (pixelsPerInch * i) / 4;
+        const major = i % 4 === 0;
+        const half = i % 2 === 0;
+        const tick = major ? 18 : half ? 14 : 9;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + tick);
+        ctx.stroke();
+        if (major) ctx.fillText(`${i / 4}"`, x, y + tick + 3);
+      }
+      ctx.textAlign = 'left';
+      ctx.fillText('inches', margin, y - 20);
+      ctx.restore();
+    }
+
+    function drawCutCircle() {
+      ctx.save();
+      ctx.strokeStyle = '#111111';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, canvas.height / 2, lastCutRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function updatePrintCopies() {
+      const restoreVisibleCanvas = !showCutCircle.checked;
+      if (restoreVisibleCanvas) drawCutCircle();
+      const src = canvas.toDataURL('image/png');
+      for (const img of printCopies.querySelectorAll('img')) {
+        img.src = src;
+      }
+      if (restoreVisibleCanvas) render(false);
+    }
+
+    function updatePrintMode() {
+      document.body.classList.toggle('print-four', printFour.checked);
+      updatePrintCopies();
+    }
+
+    function render(updateCopies = true) {
+      const sizePct = parseInt(markerSize.value, 10);
+      const pairs = parseInt(pairCount.value, 10);
+      const angleDeg = parseInt(angle.value, 10);
+      const innerPct = parseInt(innerRadiusSlider.value, 10);
+      const requestedSeparationPct = parseInt(ringSeparation.value, 10);
+      const outerPct = Math.min(innerPct + requestedSeparationPct, maxOuterRadiusPct);
+      const effectiveSeparationPct = outerPct - innerPct;
+      const innerRadius = canvas.width * (innerPct / 100);
+      const outerRadius = canvas.width * (outerPct / 100);
+      const requestedSize = canvas.width * (sizePct / 100);
+      const size = markerSizeForSpacing(requestedSize, pairs, innerRadius, outerRadius);
+      lastCutRadius = Math.min(
+        canvas.width / 2 - 32,
+        outerRadius + size * 1.55
+      );
+      sizeVal.textContent = markerSize.value;
+      pairVal.textContent = pairCount.value;
+      angleVal.textContent = angle.value;
+      speedVal.textContent = speed.value;
+      innerRadiusVal.textContent = innerRadiusSlider.value;
+      ringSeparationVal.textContent = requestedSeparationPct;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((angleDeg * Math.PI) / 180);
+
+      for (let i = 0; i < pairs; i++) {
+        const slot = Math.floor((i * angleSlotCount) / pairs);
+        const theta = (i / pairs) * Math.PI * 2 - Math.PI / 2;
+        const markerCanvas = document.createElement('canvas');
+        AR.drawMarker(markerCanvas, slot * 2 + 1, Math.round(size));
+        ctx.save();
+        ctx.translate(Math.cos(theta) * innerRadius, Math.sin(theta) * innerRadius);
+        ctx.rotate(theta + Math.PI / 2);
+        ctx.drawImage(markerCanvas, -size / 2, -size / 2, size, size);
+        ctx.restore();
+        AR.drawMarker(markerCanvas, slot * 2 + 2, Math.round(size));
+        ctx.save();
+        ctx.translate(Math.cos(theta) * outerRadius, Math.sin(theta) * outerRadius);
+        ctx.rotate(theta + Math.PI / 2);
+        ctx.drawImage(markerCanvas, -size / 2, -size / 2, size, size);
+        ctx.restore();
+        drawPairAngleLabel(i, pairs, theta, outerRadius, size);
+      }
+      ctx.restore();
+      if (showCutCircle.checked) drawCutCircle();
+      drawBottomRuler();
+      updateReaderQr();
+      if (updateCopies) updatePrintCopies();
+
+      readout.textContent = `pattern=js_aruco_two_rings\npairs=${pairs}\nangle_slots=${angleSlotCount}\npair_positions=i/pairs evenly spaced\ninner_ids=slot*2+1\nouter_ids=slot*2+2\nangle_labels=${angleLabelMode.value}\ninner_radius_pct=${Math.round((innerRadius / canvas.width) * 100)}\nouter_radius_pct=${Math.round((outerRadius / canvas.width) * 100)}\nrequested_ring_separation_pct=${requestedSeparationPct}\neffective_ring_separation_pct=${effectiveSeparationPct}\nrotation=${angleDeg} deg\nspin_speed=${speed.value} deg/s\nmin_white_gap=${Math.round(markerGapFraction * 100)}%\nrequested_marker_size=${Math.round(requestedSize)}px\neffective_marker_size=${Math.round(size)}px\nreader=${readerUrl()}`;
+    }
+
+    function step(ts) {
+      if (!animating) return;
+      if (lastTs === null) lastTs = ts;
+      const dtSec = (ts - lastTs) / 1000;
+      lastTs = ts;
+      const spinRate = parseFloat(speed.value);
+      angleDegFloat = (angleDegFloat + spinRate * dtSec) % 360;
+      if (angleDegFloat < 0) angleDegFloat += 360;
+      angle.value = Math.round(angleDegFloat);
+      render();
+      rafId = requestAnimationFrame(step);
+    }
+
+    function setAnimating(next) {
+      animating = next;
+      if (animating) {
+        angleDegFloat = parseInt(angle.value, 10);
+        lastTs = null;
+        animateBtn.textContent = '⏸ Pause';
+        animateBtn.classList.add('animating');
+        angle.disabled = true;
+        rafId = requestAnimationFrame(step);
+      } else {
+        animateBtn.textContent = '▶ Animate';
+        animateBtn.classList.remove('animating');
+        angle.disabled = false;
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    }
+
+    markerSize.addEventListener('input', render);
+    pairCount.addEventListener('input', render);
+    innerRadiusSlider.addEventListener('input', render);
+    ringSeparation.addEventListener('input', render);
+    angleLabelMode.addEventListener('change', render);
+    showCutCircle.addEventListener('change', render);
+    angle.addEventListener('input', () => {
+      angleDegFloat = parseInt(angle.value, 10);
+      render();
+    });
+    speed.addEventListener('input', render);
+    printFour.addEventListener('change', updatePrintMode);
+    printBtn.addEventListener('click', () => {
+      updatePrintMode();
+      window.print();
+    });
+    animateBtn.addEventListener('click', () => setAnimating(!animating));
+    updatePrintMode();
+    render();
+    updateReaderUrlFromLanConfig();
+  </script>
+</body>
+</html>
