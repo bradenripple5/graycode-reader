@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cerrno>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -15,6 +17,13 @@
 #include <vector>
 
 #include <opencv2/opencv.hpp>
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace {
 
@@ -43,6 +52,10 @@ struct Options {
   bool simpleCross = true;
   bool noWindow = false;
   bool separateWindows = false;
+  bool angleLine = false;
+  bool angleCsv = false;
+  int tcpPort = 0;
+  int udpPort = 0;
 };
 
 struct Marker {
@@ -532,7 +545,9 @@ cv::Mat composeMosaic(const std::vector<CameraFrame>& frames, int requestedTileW
     label << "cam " << frames[i].cameraIndex
           << " | cap " << frames[i].captureFps
           << " | ms " << frames[i].result.elapsedMs
-          << " | pairs " << frames[i].result.pairs.size();
+          << " | pairs " << frames[i].result.pairs.size()
+          << " | angle "
+          << (frames[i].result.upAngle ? std::to_string(*frames[i].result.upAngle).substr(0, 6) : "n/a");
     cv::rectangle(mosaic, {roi.x, roi.y}, {roi.x + tileWidth, roi.y + 28}, {0, 0, 0}, cv::FILLED);
     cv::putText(mosaic, label.str(), {roi.x + 8, roi.y + 20},
                 cv::FONT_HERSHEY_SIMPLEX, 0.52, {255, 255, 255}, 1, cv::LINE_AA);
@@ -600,6 +615,191 @@ std::vector<int> parseCameraList(const std::string& value) {
   return cameras;
 }
 
+std::string formatAngle(std::optional<double> angle, int precision = 2) {
+  if (!angle) return "n/a";
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(precision) << *angle;
+  return out.str();
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry networking: one shared TCP port and one shared UDP port. Every
+// camera's per-frame result (angle/pairs/markers) is broadcast to whoever is
+// listening. A "camera" field in each JSON line tells clients which camera a
+// message came from, so multiple cameras can share a single port pair.
+//
+// TCP: standard listening socket. Any client that connects receives a stream
+// of newline-delimited JSON objects, one per processed frame per camera,
+// until it disconnects.
+//
+// UDP: since UDP has no concept of a "connection", a client subscribes by
+// sending any datagram (even an empty one) to the UDP port. That sender's
+// address is remembered and future telemetry is sent to it. There is no
+// automatic expiry of subscribers; a client that goes away just silently
+// stops receiving useful traffic (sends to a dead address are cheap no-ops
+// on Linux).
+// ---------------------------------------------------------------------------
+
+std::string jsonAngleField(std::optional<double> angle) {
+  if (!angle) return "null";
+  return formatAngle(angle, 6);
+}
+
+std::string buildTelemetryJson(int64_t tsMs, int cameraIndex, int frameNo,
+                               const FrameResult& result, int expectedPairs) {
+  std::ostringstream out;
+  out << "{\"ts_ms\":" << tsMs
+      << ",\"camera\":" << cameraIndex
+      << ",\"frame\":" << frameNo
+      << ",\"angle\":" << jsonAngleField(result.upAngle)
+      << ",\"pairs\":" << result.pairs.size()
+      << ",\"expected_pairs\":" << expectedPairs
+      << ",\"markers\":" << result.markers.size()
+      << ",\"elapsed_ms\":" << result.elapsedMs
+      << "}";
+  return out.str();
+}
+
+class TelemetryServer {
+ public:
+  ~TelemetryServer() { stop(); }
+
+  bool startTcp(int port) {
+    tcpFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (tcpFd_ < 0) return false;
+    int opt = 1;
+    ::setsockopt(tcpFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (::bind(tcpFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+      ::close(tcpFd_);
+      tcpFd_ = -1;
+      return false;
+    }
+    if (::listen(tcpFd_, 16) < 0) {
+      ::close(tcpFd_);
+      tcpFd_ = -1;
+      return false;
+    }
+    setNonBlocking(tcpFd_);
+    return true;
+  }
+
+  bool startUdp(int port) {
+    udpFd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (udpFd_ < 0) return false;
+    int opt = 1;
+    ::setsockopt(udpFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (::bind(udpFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+      ::close(udpFd_);
+      udpFd_ = -1;
+      return false;
+    }
+    setNonBlocking(udpFd_);
+    return true;
+  }
+
+  // Call once per loop iteration: accepts new TCP clients and registers any
+  // new UDP subscribers without blocking.
+  void poll() {
+    acceptTcpClients();
+    pollUdpSubscribers();
+  }
+
+  void broadcast(const std::string& line) {
+    const std::string payload = line + "\n";
+    broadcastTcp(payload);
+    broadcastUdp(payload);
+  }
+
+  void stop() {
+    for (int fd : tcpClients_) ::close(fd);
+    tcpClients_.clear();
+    if (tcpFd_ >= 0) { ::close(tcpFd_); tcpFd_ = -1; }
+    if (udpFd_ >= 0) { ::close(udpFd_); udpFd_ = -1; }
+  }
+
+  int tcpClientCount() const { return static_cast<int>(tcpClients_.size()); }
+  int udpSubscriberCount() const { return static_cast<int>(udpSubscribers_.size()); }
+
+ private:
+  static void setNonBlocking(int fd) {
+    int flags = ::fcntl(fd, F_GETFL, 0);
+    ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  }
+
+  void acceptTcpClients() {
+    if (tcpFd_ < 0) return;
+    while (true) {
+      sockaddr_in clientAddr{};
+      socklen_t len = sizeof(clientAddr);
+      int clientFd = ::accept(tcpFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
+      if (clientFd < 0) break;
+      setNonBlocking(clientFd);
+      int opt = 1;
+      ::setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+      tcpClients_.push_back(clientFd);
+      std::cerr << "telemetry: tcp client connected " << inet_ntoa(clientAddr.sin_addr)
+                << ":" << ntohs(clientAddr.sin_port)
+                << " (total " << tcpClients_.size() << ")\n";
+    }
+  }
+
+  void pollUdpSubscribers() {
+    if (udpFd_ < 0) return;
+    char buf[512];
+    while (true) {
+      sockaddr_in srcAddr{};
+      socklen_t len = sizeof(srcAddr);
+      ssize_t n = ::recvfrom(udpFd_, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&srcAddr), &len);
+      if (n < 0) break;
+      const uint64_t key = (static_cast<uint64_t>(srcAddr.sin_addr.s_addr) << 16) | ntohs(srcAddr.sin_port);
+      if (udpSubscriberKeys_.insert(key).second) {
+        udpSubscribers_.push_back(srcAddr);
+        std::cerr << "telemetry: udp subscriber added " << inet_ntoa(srcAddr.sin_addr)
+                  << ":" << ntohs(srcAddr.sin_port)
+                  << " (total " << udpSubscribers_.size() << ")\n";
+      }
+    }
+  }
+
+  void broadcastTcp(const std::string& payload) {
+    if (tcpClients_.empty()) return;
+    std::vector<int> dead;
+    for (int fd : tcpClients_) {
+      ssize_t sent = ::send(fd, payload.data(), payload.size(), MSG_NOSIGNAL);
+      if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) dead.push_back(fd);
+    }
+    if (!dead.empty()) {
+      for (int fd : dead) {
+        ::close(fd);
+        tcpClients_.erase(std::remove(tcpClients_.begin(), tcpClients_.end(), fd), tcpClients_.end());
+      }
+      std::cerr << "telemetry: tcp client(s) dropped, remaining " << tcpClients_.size() << "\n";
+    }
+  }
+
+  void broadcastUdp(const std::string& payload) {
+    if (udpSubscribers_.empty()) return;
+    for (const auto& addr : udpSubscribers_) {
+      ::sendto(udpFd_, payload.data(), payload.size(), 0,
+                reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    }
+  }
+
+  int tcpFd_ = -1;
+  int udpFd_ = -1;
+  std::vector<int> tcpClients_;
+  std::vector<sockaddr_in> udpSubscribers_;
+  std::set<uint64_t> udpSubscriberKeys_;
+};
+
 void printUsage(const char* name) {
   std::cerr
       << "Usage: " << name << " [options]\n"
@@ -624,6 +824,19 @@ void printUsage(const char* name) {
       << "  --ring-fit            use ring-fit pair mode instead of simple pair mode\n"
       << "  --no-window           print results without opening an OpenCV window\n"
       << "  --separate-windows    show one OpenCV window per camera instead of a grid\n"
+      << "  --angle-line          print one updating line with all camera angles\n"
+      << "  --angle-csv           print timestamp,camera,angle,pairs,markers rows\n"
+      << "  --tcp-port N          serve telemetry JSON to any TCP client on port N\n"
+      << "  --udp-port N          serve telemetry JSON to UDP clients that send a\n"
+      << "                        subscribe datagram (any bytes) to port N\n"
+      << "\n"
+      << "Telemetry (--tcp-port / --udp-port), one shared port for all cameras:\n"
+      << "  Each processed frame emits one JSON line, e.g.:\n"
+      << "    {\"ts_ms\":1731093012345,\"camera\":0,\"frame\":42,\"angle\":187.512400,\n"
+      << "     \"pairs\":9,\"expected_pairs\":10,\"markers\":18,\"elapsed_ms\":6}\n"
+      << "  TCP: connect and read newline-delimited JSON, e.g. `nc HOST PORT`.\n"
+      << "  UDP: send any datagram to subscribe, e.g. `echo -n hi | nc -u -w0 HOST PORT`,\n"
+      << "       then listen on the ephemeral source port you sent from.\n"
       << "\n"
       << "Runtime keys in the preview window:\n"
       << "  q/Esc quit, +/- threshold, [/] process FPS, t fixed threshold,\n"
@@ -689,6 +902,14 @@ bool parseArgs(int argc, char** argv, Options& options) {
       options.noWindow = true;
     } else if (arg == "--separate-windows") {
       options.separateWindows = true;
+    } else if (arg == "--angle-line") {
+      options.angleLine = true;
+    } else if (arg == "--angle-csv") {
+      options.angleCsv = true;
+    } else if (arg == "--tcp-port") {
+      if (!readInt(options.tcpPort)) return false;
+    } else if (arg == "--udp-port") {
+      if (!readInt(options.udpPort)) return false;
     } else if (arg == "--help" || arg == "-h") {
       printUsage(argv[0]);
       std::exit(0);
@@ -703,6 +924,8 @@ bool parseArgs(int argc, char** argv, Options& options) {
   options.expectedPairs = std::max(1, options.expectedPairs);
   options.printEvery = std::max(1, options.printEvery);
   options.processFps = std::max(0.0, options.processFps);
+  options.tcpPort = std::max(0, options.tcpPort);
+  options.udpPort = std::max(0, options.udpPort);
   if (options.cameras.empty()) options.cameras.push_back(options.camera);
   return true;
 }
@@ -756,6 +979,26 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  TelemetryServer telemetry;
+  if (options.tcpPort > 0) {
+    if (telemetry.startTcp(options.tcpPort)) {
+      std::cerr << "telemetry: tcp listening on port " << options.tcpPort << "\n";
+    } else {
+      std::cerr << "telemetry: failed to start TCP server on port " << options.tcpPort << "\n";
+      options.tcpPort = 0;
+    }
+  }
+  if (options.udpPort > 0) {
+    if (telemetry.startUdp(options.udpPort)) {
+      std::cerr << "telemetry: udp listening on port " << options.udpPort
+                << " (clients subscribe by sending any datagram)\n";
+    } else {
+      std::cerr << "telemetry: failed to start UDP server on port " << options.udpPort << "\n";
+      options.udpPort = 0;
+    }
+  }
+  const bool telemetryEnabled = options.tcpPort > 0 || options.udpPort > 0;
+
   const bool gridWindow = cameras.size() > 1 && !options.separateWindows;
   const std::string controlsWindowName = gridWindow
       ? "basic fiducial native reader grid"
@@ -784,6 +1027,7 @@ int main(int argc, char** argv) {
   auto nextFrameAt = std::chrono::steady_clock::now();
   while (true) {
     auto loopStart = std::chrono::steady_clock::now();
+    if (telemetryEnabled) telemetry.poll();
     if (!options.noWindow) {
       options.threshold = std::clamp(thresholdTrack, 0, 255);
       options.processFps = std::max(0, processFpsTrack);
@@ -806,6 +1050,9 @@ int main(int argc, char** argv) {
     }
 
     std::vector<CameraFrame> cameraFrames;
+    std::vector<std::string> angleParts;
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
     for (auto& camera : cameras) {
       cv::Mat frame;
       if (!camera.cap.read(frame) || frame.empty()) {
@@ -814,21 +1061,39 @@ int main(int argc, char** argv) {
       }
 
       auto result = processCameraFrame(frame, options);
+
+      if (telemetryEnabled) {
+        telemetry.broadcast(buildTelemetryJson(nowMs, camera.index, camera.frameNo, result, options.expectedPairs));
+      }
+
       std::ostringstream ids;
       for (size_t i = 0; i < result.markers.size(); ++i) {
         if (i) ids << ",";
         ids << "#" << result.markers[i].id;
       }
       if (camera.frameNo % options.printEvery == 0) {
-        std::cout << "cam=" << camera.index
-                  << " frame=" << camera.frameNo
-                  << " ms=" << result.elapsedMs
-                  << " markers=" << result.markers.size()
-                  << " pairs=" << result.pairs.size() << "/" << options.expectedPairs
-                  << " angle=" << (result.upAngle ? std::to_string(*result.upAngle) : "n/a")
-                  << " ids=" << ids.str();
-        if (!result.thresholdSummary.empty()) std::cout << " " << result.thresholdSummary;
-        std::cout << std::endl;
+        std::ostringstream part;
+        part << "cam" << camera.index << "=" << formatAngle(result.upAngle, 2)
+             << "(" << result.pairs.size() << "/" << options.expectedPairs << ")";
+        angleParts.push_back(part.str());
+
+        if (options.angleCsv) {
+          std::cout << nowMs << "," << camera.index << ","
+                    << formatAngle(result.upAngle, 6) << ","
+                    << result.pairs.size() << ","
+                    << result.markers.size() << ","
+                    << result.elapsedMs << "\n";
+        } else if (!options.angleLine) {
+          std::cout << "cam=" << camera.index
+                    << " frame=" << camera.frameNo
+                    << " ms=" << result.elapsedMs
+                    << " markers=" << result.markers.size()
+                    << " pairs=" << result.pairs.size() << "/" << options.expectedPairs
+                    << " angle=" << formatAngle(result.upAngle, 6)
+                    << " ids=" << ids.str();
+          if (!result.thresholdSummary.empty()) std::cout << " " << result.thresholdSummary;
+          std::cout << std::endl;
+        }
       }
       camera.frameNo++;
 
@@ -839,6 +1104,7 @@ int main(int argc, char** argv) {
             << " | cap " << camera.cap.get(cv::CAP_PROP_FPS)
             << " fps | proc " << (options.processFps > 0.0 ? std::to_string(options.processFps) : "max")
             << " | t=" << options.threshold
+            << " | angle=" << formatAngle(result.upAngle, 2)
             << " | mode=" << (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw")));
         cv::putText(result.display, hud.str(), {12, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 2, cv::LINE_AA);
         if (!gridWindow) cv::imshow(camera.windowName, result.display);
@@ -846,6 +1112,15 @@ int main(int argc, char** argv) {
       if (!options.noWindow && gridWindow) {
         cameraFrames.push_back({camera.index, camera.frameNo, camera.cap.get(cv::CAP_PROP_FPS), std::move(result)});
       }
+    }
+
+    if (options.angleLine && !angleParts.empty()) {
+      std::cout << "\r";
+      for (size_t i = 0; i < angleParts.size(); ++i) {
+        if (i) std::cout << "  ";
+        std::cout << angleParts[i];
+      }
+      std::cout << "        " << std::flush;
     }
 
     if (!options.noWindow) {
@@ -883,5 +1158,6 @@ int main(int argc, char** argv) {
     }
   }
 
+  telemetry.stop();
   return 0;
 }
