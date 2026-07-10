@@ -103,12 +103,33 @@
           <input id="scanRate" type="range" min="1" max="30" value="12" step="1">
         </label>
         <label>
+          Camera
+          <select id="cameraSelect"></select>
+        </label>
+        <button id="refreshCamerasBtn" type="button">Refresh Cameras</button>
+        <label>
           Simple crosses
           <input id="simpleCrossMode" type="checkbox" checked>
         </label>
         <label>
           Expected pairs: <span id="expectedPairsVal">10</span>
           <input id="expectedPairs" type="range" min="1" max="20" value="10" step="1">
+        </label>
+        <label>
+          Intensity threshold: <span id="thresholdVal">128</span>
+          <input id="intensityThreshold" type="range" min="0" max="255" value="128" step="1">
+        </label>
+        <label>
+          Use threshold preview
+          <input id="useThreshold" type="checkbox">
+        </label>
+        <label>
+          Auto threshold 30/50/70
+          <input id="autoThreshold" type="checkbox">
+        </label>
+        <label>
+          Best threshold each frame
+          <input id="bestThreshold" type="checkbox">
         </label>
       </div>
       <div class="readout">
@@ -132,9 +153,16 @@
     const stopBtn = document.getElementById('stopBtn');
     const downscale = document.getElementById('downscale');
     const scanRate = document.getElementById('scanRate');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const refreshCamerasBtn = document.getElementById('refreshCamerasBtn');
     const simpleCrossMode = document.getElementById('simpleCrossMode');
     const expectedPairs = document.getElementById('expectedPairs');
     const expectedPairsVal = document.getElementById('expectedPairsVal');
+    const intensityThreshold = document.getElementById('intensityThreshold');
+    const thresholdVal = document.getElementById('thresholdVal');
+    const useThreshold = document.getElementById('useThreshold');
+    const autoThreshold = document.getElementById('autoThreshold');
+    const bestThreshold = document.getElementById('bestThreshold');
     const downscaleVal = document.getElementById('downscaleVal');
     const scanRateVal = document.getElementById('scanRateVal');
     const centerDisplay = document.getElementById('centerDisplay');
@@ -146,7 +174,10 @@
     let timerId = null;
     let scanCount = 0;
     let detector = null;
+    let cameraDevices = [];
     const angleSlotCount = 20;
+    const autoThresholdPercents = [30, 50, 70];
+    const bestThresholdIterations = 6;
     function markerCenter(marker) {
       return {
         x: marker.corners.reduce((sum, point) => sum + point.x, 0) / marker.corners.length,
@@ -176,6 +207,76 @@
       ctx.lineTo(center.x, center.y + size);
       ctx.stroke();
       ctx.restore();
+    }
+    function selectedCameraConstraint() {
+      const selected = cameraSelect.value;
+      if (!selected) return { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } };
+      return { deviceId: { exact: selected }, width: { ideal: 1280 }, height: { ideal: 720 } };
+    }
+    function cameraQueryPreference() {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        deviceId: params.get('deviceId') || '',
+        camera: params.get('camera') || '',
+        cameraLabel: params.get('cameraLabel') || ''
+      };
+    }
+    function chooseCameraIndex(devices, preference) {
+      if (!devices.length) return -1;
+      if (preference.deviceId) {
+        const idx = devices.findIndex((device) => device.deviceId === preference.deviceId);
+        if (idx >= 0) return idx;
+      }
+      if (preference.camera) {
+        const numeric = Number.parseInt(preference.camera, 10);
+        if (Number.isInteger(numeric) && numeric >= 0 && numeric < devices.length) return numeric;
+        const labelIdx = devices.findIndex((device) =>
+          (device.label || '').toLowerCase().includes(preference.camera.toLowerCase())
+        );
+        if (labelIdx >= 0) return labelIdx;
+      }
+      if (preference.cameraLabel) {
+        const labelIdx = devices.findIndex((device) =>
+          (device.label || '').toLowerCase().includes(preference.cameraLabel.toLowerCase())
+        );
+        if (labelIdx >= 0) return labelIdx;
+      }
+      const saved = window.localStorage.getItem('basicFiducialCameraId') || '';
+      if (saved) {
+        const idx = devices.findIndex((device) => device.deviceId === saved);
+        if (idx >= 0) return idx;
+      }
+      return 0;
+    }
+    async function ensureCameraLabelsAvailable() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((device) => device.kind === 'videoinput');
+      if (cameras.some((camera) => camera.label)) return cameras;
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      probe.getTracks().forEach((track) => track.stop());
+      return (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'videoinput');
+    }
+    async function populateCameraSelect() {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        cameraSelect.innerHTML = '<option value="">Camera list unavailable</option>';
+        return;
+      }
+      try {
+        cameraDevices = await ensureCameraLabelsAvailable();
+        const preference = cameraQueryPreference();
+        const selectedIndex = chooseCameraIndex(cameraDevices, preference);
+        cameraSelect.innerHTML = '';
+        cameraDevices.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.textContent = `${index}: ${device.label || `Camera ${index + 1}`}`;
+          cameraSelect.appendChild(option);
+        });
+        if (selectedIndex >= 0) cameraSelect.selectedIndex = selectedIndex;
+      } catch (err) {
+        cameraSelect.innerHTML = '<option value="">Camera permission needed</option>';
+        statusText.textContent = `Camera list error: ${err.message}`;
+      }
     }
     // Draws a line from `from` to `to` with a small arrowhead at `to`,
     // so the pairing direction (inner -> outer) is visible at a glance.
@@ -368,6 +469,136 @@
       }
       ctx.restore();
     }
+    function cloneImageData(imageData) {
+      return new ImageData(
+        new Uint8ClampedArray(imageData.data),
+        imageData.width,
+        imageData.height
+      );
+    }
+    function thresholdFromPercent(percent) {
+      return Math.round((percent / 100) * 255);
+    }
+    function applyIntensityThreshold(imageData, thresholdOverride = null) {
+      const threshold = thresholdOverride === null
+        ? parseInt(intensityThreshold.value, 10)
+        : thresholdOverride;
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const intensity = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+        const value = intensity > threshold ? 255 : 0;
+        data[i] = value;
+        data[i + 1] = value;
+        data[i + 2] = value;
+        data[i + 3] = 255;
+      }
+      return imageData;
+    }
+    function detectMarkers(imageData) {
+      return detector.detect(imageData).sort((a, b) => markerArea(b) - markerArea(a));
+    }
+    function compileThresholdMarkers(passes) {
+      const byId = new Map();
+      for (const pass of passes) {
+        for (const marker of pass.markers) {
+          const current = byId.get(marker.id);
+          const area = markerArea(marker);
+          if (!current) {
+            byId.set(marker.id, {
+              marker,
+              bestArea: area,
+              count: 1,
+              percents: [pass.percent]
+            });
+          } else {
+            current.count++;
+            current.percents.push(pass.percent);
+            if (area > current.bestArea) {
+              current.marker = marker;
+              current.bestArea = area;
+            }
+          }
+        }
+      }
+      return Array.from(byId.values())
+        .sort((a, b) => b.count - a.count || b.bestArea - a.bestArea)
+        .map((entry) => entry.marker);
+    }
+    function markerSetArea(markers) {
+      return markers.reduce((sum, marker) => sum + markerArea(marker), 0);
+    }
+    function scoreThresholdPass(markers) {
+      const expectedTotal = parseInt(expectedPairs.value, 10);
+      const pairs = simpleCrossMode.checked
+        ? findMarkerPairs(markers)
+        : (estimateRingPairs(markers)?.pairs || []);
+      return {
+        pairCount: pairs.length,
+        markerCount: markers.length,
+        area: markerSetArea(markers),
+        expectedGap: Math.abs(expectedTotal - pairs.length)
+      };
+    }
+    function compareThresholdScores(a, b) {
+      if (a.score.pairCount !== b.score.pairCount) return b.score.pairCount - a.score.pairCount;
+      if (a.score.markerCount !== b.score.markerCount) return b.score.markerCount - a.score.markerCount;
+      if (a.score.expectedGap !== b.score.expectedGap) return a.score.expectedGap - b.score.expectedGap;
+      return b.score.area - a.score.area;
+    }
+    function detectThresholdPass(imageData, threshold, cache) {
+      if (cache.has(threshold)) return cache.get(threshold);
+      const thresholded = applyIntensityThreshold(cloneImageData(imageData), threshold);
+      const markers = detectMarkers(thresholded);
+      const pass = {
+        threshold,
+        markers,
+        score: scoreThresholdPass(markers)
+      };
+      cache.set(threshold, pass);
+      return pass;
+    }
+    function findBestThresholdPass(imageData) {
+      let low = 0;
+      let high = 255;
+      let best = null;
+      const cache = new Map();
+      const path = [];
+      best = detectThresholdPass(imageData, low, cache);
+      path.push(best.threshold);
+
+      const firstMid = Math.round((low + high) / 2);
+      const firstMidPass = detectThresholdPass(imageData, firstMid, cache);
+      best = [best, firstMidPass].sort(compareThresholdScores)[0];
+      path.push(firstMidPass.threshold);
+
+      for (let i = 0; i < bestThresholdIterations && high - low > 2; i++) {
+        const mid = Math.round((low + high) / 2);
+        const left = Math.round((low + mid) / 2);
+        const right = Math.round((mid + high) / 2);
+        const candidates = [
+          detectThresholdPass(imageData, left, cache),
+          detectThresholdPass(imageData, mid, cache),
+          detectThresholdPass(imageData, right, cache)
+        ].sort(compareThresholdScores);
+        const winner = candidates[0];
+        best = best ? [best, winner].sort(compareThresholdScores)[0] : winner;
+        path.push(winner.threshold);
+
+        if (winner.threshold < mid) {
+          high = mid;
+        } else if (winner.threshold > mid) {
+          low = mid;
+        } else {
+          low = left;
+          high = right;
+        }
+      }
+
+      return {
+        ...best,
+        path
+      };
+    }
     function processFrame() {
       if (!stream || !video.videoWidth || !video.videoHeight) return;
       scanCount++;
@@ -388,8 +619,38 @@
         return;
       }
       if (!detector) detector = new AR.Detector();
-      const imageData = ctx.getImageData(0, 0, preview.width, preview.height);
-      const markers = detector.detect(imageData).sort((a, b) => markerArea(b) - markerArea(a));
+      let imageData = ctx.getImageData(0, 0, preview.width, preview.height);
+      let markers;
+      let thresholdSummary = '';
+      if (bestThreshold.checked) {
+        const bestPass = findBestThresholdPass(imageData);
+        markers = bestPass ? bestPass.markers : [];
+        thresholdSummary = bestPass
+          ? `; best t=${bestPass.threshold} (${bestPass.path.join('>')}) ${bestPass.markers.length} markers/${bestPass.score.pairCount} pairs`
+          : '; best n/a';
+        if (useThreshold.checked && bestPass) {
+          ctx.putImageData(applyIntensityThreshold(cloneImageData(imageData), bestPass.threshold), 0, 0);
+        }
+      } else if (autoThreshold.checked) {
+        const passes = autoThresholdPercents.map((percent) => {
+          const thresholded = applyIntensityThreshold(cloneImageData(imageData), thresholdFromPercent(percent));
+          return {
+            percent,
+            markers: detectMarkers(thresholded)
+          };
+        });
+        markers = compileThresholdMarkers(passes);
+        thresholdSummary = `; auto ${passes.map((pass) => `${pass.percent}%=${pass.markers.length}`).join(', ')} -> ${markers.length}`;
+        if (useThreshold.checked) {
+          ctx.putImageData(applyIntensityThreshold(cloneImageData(imageData), thresholdFromPercent(50)), 0, 0);
+        }
+      } else {
+        if (useThreshold.checked) {
+          imageData = applyIntensityThreshold(imageData);
+          ctx.putImageData(imageData, 0, 0);
+        }
+        markers = detectMarkers(imageData);
+      }
       const scanMs = Math.round(performance.now() - start);
       if (!markers.length) {
         centerDisplay.textContent = 'n/a';
@@ -477,17 +738,21 @@
           }
         }
       }
-      scanDisplay.textContent = `#${scanCount}, ${scanMs} ms @ ${preview.width}x${preview.height}`;
+      scanDisplay.textContent = `#${scanCount}, ${scanMs} ms @ ${preview.width}x${preview.height}${thresholdSummary}`;
       timerId = window.setTimeout(processFrame, Math.round(1000 / Math.max(1, parseInt(scanRate.value, 10))));
     }
     async function startCamera() {
       if (stream) return;
       try {
         statusText.textContent = 'Starting camera...';
+        if (!cameraDevices.length) await populateCameraSelect();
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: selectedCameraConstraint(),
           audio: false
         });
+        if (cameraSelect.value) {
+          window.localStorage.setItem('basicFiducialCameraId', cameraSelect.value);
+        }
         video.srcObject = stream;
         await video.play();
         startBtn.disabled = true;
@@ -514,12 +779,24 @@
       downscaleVal.textContent = downscale.value;
       scanRateVal.textContent = scanRate.value;
       expectedPairsVal.textContent = expectedPairs.value;
+      thresholdVal.textContent = intensityThreshold.value;
     }
     startBtn.addEventListener('click', startCamera);
     stopBtn.addEventListener('click', stopCamera);
-    for (const input of [downscale, scanRate, expectedPairs]) input.addEventListener('input', updateLabels);
+    refreshCamerasBtn.addEventListener('click', populateCameraSelect);
+    cameraSelect.addEventListener('change', async () => {
+      window.localStorage.setItem('basicFiducialCameraId', cameraSelect.value);
+      if (stream) {
+        stopCamera();
+        await startCamera();
+      }
+    });
+    for (const input of [downscale, scanRate, expectedPairs, intensityThreshold, useThreshold, autoThreshold, bestThreshold]) input.addEventListener('input', updateLabels);
     updateLabels();
-    window.addEventListener('load', startCamera);
+    window.addEventListener('load', async () => {
+      await populateCameraSelect();
+      startCamera();
+    });
   </script>
 </body>
 </html>
