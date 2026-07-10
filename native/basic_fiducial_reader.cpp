@@ -29,6 +29,7 @@ struct Options {
   int downscale = 640;
   int expectedPairs = 10;
   int threshold = 128;
+  int tileWidth = 0;
   double fps = 0.0;
   double processFps = 0.0;
   double exposure = std::numeric_limits<double>::quiet_NaN();
@@ -41,6 +42,7 @@ struct Options {
   bool bestThreshold = false;
   bool simpleCross = true;
   bool noWindow = false;
+  bool separateWindows = false;
 };
 
 struct Marker {
@@ -87,6 +89,13 @@ struct FrameResult {
   std::optional<double> upAngle;
   std::string thresholdSummary;
   long elapsedMs = 0;
+};
+
+struct CameraFrame {
+  int cameraIndex = 0;
+  int frameNo = 0;
+  double captureFps = 0.0;
+  FrameResult result;
 };
 
 double normalizeDeg(double value) {
@@ -501,6 +510,37 @@ void drawOverlay(cv::Mat& frame, const std::vector<Marker>& markers, const std::
   }
 }
 
+cv::Mat composeMosaic(const std::vector<CameraFrame>& frames, int requestedTileWidth) {
+  if (frames.empty()) return {};
+  const int count = static_cast<int>(frames.size());
+  const int cols = static_cast<int>(std::ceil(std::sqrt(count)));
+  const int rows = static_cast<int>(std::ceil(static_cast<double>(count) / cols));
+  const int tileWidth = requestedTileWidth > 0 ? requestedTileWidth : std::min(420, frames.front().result.display.cols);
+  const double aspect = static_cast<double>(frames.front().result.display.rows) / frames.front().result.display.cols;
+  const int tileHeight = std::max(1, static_cast<int>(std::round(tileWidth * aspect)));
+
+  cv::Mat mosaic(rows * tileHeight, cols * tileWidth, CV_8UC3, cv::Scalar(18, 18, 18));
+  for (int i = 0; i < count; ++i) {
+    cv::Mat tile;
+    cv::resize(frames[i].result.display, tile, cv::Size(tileWidth, tileHeight));
+    const int row = i / cols;
+    const int col = i % cols;
+    cv::Rect roi(col * tileWidth, row * tileHeight, tileWidth, tileHeight);
+    tile.copyTo(mosaic(roi));
+
+    std::ostringstream label;
+    label << "cam " << frames[i].cameraIndex
+          << " | cap " << frames[i].captureFps
+          << " | ms " << frames[i].result.elapsedMs
+          << " | pairs " << frames[i].result.pairs.size();
+    cv::rectangle(mosaic, {roi.x, roi.y}, {roi.x + tileWidth, roi.y + 28}, {0, 0, 0}, cv::FILLED);
+    cv::putText(mosaic, label.str(), {roi.x + 8, roi.y + 20},
+                cv::FONT_HERSHEY_SIMPLEX, 0.52, {255, 255, 255}, 1, cv::LINE_AA);
+    cv::rectangle(mosaic, roi, {70, 70, 70}, 1);
+  }
+  return mosaic;
+}
+
 FrameResult processCameraFrame(const cv::Mat& frame, const Options& options) {
   auto start = std::chrono::steady_clock::now();
   double scale = static_cast<double>(options.downscale) / frame.cols;
@@ -570,6 +610,7 @@ void printUsage(const char* name) {
       << "  --fps N               requested camera capture FPS\n"
       << "  --process-fps N       throttle detector loop FPS; 0 = unlimited\n"
       << "  --downscale N         processing width (default 640)\n"
+      << "  --tile-width N        grid display tile width; 0 = auto\n"
       << "  --expected-pairs N    expected printed pairs (default 10)\n"
       << "  --threshold N         fixed threshold 0..255\n"
       << "  --exposure N          requested camera exposure value\n"
@@ -582,6 +623,7 @@ void printUsage(const char* name) {
       << "  --best-threshold      binary-style per-frame threshold search\n"
       << "  --ring-fit            use ring-fit pair mode instead of simple pair mode\n"
       << "  --no-window           print results without opening an OpenCV window\n"
+      << "  --separate-windows    show one OpenCV window per camera instead of a grid\n"
       << "\n"
       << "Runtime keys in the preview window:\n"
       << "  q/Esc quit, +/- threshold, [/] process FPS, t fixed threshold,\n"
@@ -619,6 +661,8 @@ bool parseArgs(int argc, char** argv, Options& options) {
       if (!readDouble(options.processFps)) return false;
     } else if (arg == "--downscale") {
       if (!readInt(options.downscale)) return false;
+    } else if (arg == "--tile-width") {
+      if (!readInt(options.tileWidth)) return false;
     } else if (arg == "--expected-pairs") {
       if (!readInt(options.expectedPairs)) return false;
     } else if (arg == "--threshold") {
@@ -643,6 +687,8 @@ bool parseArgs(int argc, char** argv, Options& options) {
       options.simpleCross = false;
     } else if (arg == "--no-window") {
       options.noWindow = true;
+    } else if (arg == "--separate-windows") {
+      options.separateWindows = true;
     } else if (arg == "--help" || arg == "-h") {
       printUsage(argv[0]);
       std::exit(0);
@@ -653,6 +699,7 @@ bool parseArgs(int argc, char** argv, Options& options) {
   }
   options.threshold = std::clamp(options.threshold, 0, 255);
   options.downscale = std::max(1, options.downscale);
+  options.tileWidth = std::max(0, options.tileWidth);
   options.expectedPairs = std::max(1, options.expectedPairs);
   options.printEvery = std::max(1, options.printEvery);
   options.processFps = std::max(0.0, options.processFps);
@@ -709,7 +756,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const std::string controlsWindowName = cameras.front().windowName;
+  const bool gridWindow = cameras.size() > 1 && !options.separateWindows;
+  const std::string controlsWindowName = gridWindow
+      ? "basic fiducial native reader grid"
+      : cameras.front().windowName;
   int thresholdTrack = options.threshold;
   int modeTrack = options.bestThreshold ? 3 : (options.autoThreshold ? 2 : (options.useThreshold ? 1 : 0));
   int processFpsTrack = static_cast<int>(std::round(options.processFps));
@@ -719,7 +769,11 @@ int main(int argc, char** argv) {
   int expectedPairsTrack = options.expectedPairs;
   for (auto& camera : cameras) camera.lastCaptureFpsTrack = captureFpsTrack;
   if (!options.noWindow) {
-    for (const auto& camera : cameras) cv::namedWindow(camera.windowName, cv::WINDOW_NORMAL);
+    if (gridWindow) {
+      cv::namedWindow(controlsWindowName, cv::WINDOW_NORMAL);
+    } else {
+      for (const auto& camera : cameras) cv::namedWindow(camera.windowName, cv::WINDOW_NORMAL);
+    }
     cv::createTrackbar("Threshold", controlsWindowName, &thresholdTrack, 255);
     cv::createTrackbar("Mode 0raw 1fix 2auto 3best", controlsWindowName, &modeTrack, 3);
     cv::createTrackbar("Process FPS 0=max", controlsWindowName, &processFpsTrack, 60);
@@ -751,6 +805,7 @@ int main(int argc, char** argv) {
       }
     }
 
+    std::vector<CameraFrame> cameraFrames;
     for (auto& camera : cameras) {
       cv::Mat frame;
       if (!camera.cap.read(frame) || frame.empty()) {
@@ -786,11 +841,18 @@ int main(int argc, char** argv) {
             << " | t=" << options.threshold
             << " | mode=" << (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw")));
         cv::putText(result.display, hud.str(), {12, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 2, cv::LINE_AA);
-        cv::imshow(camera.windowName, result.display);
+        if (!gridWindow) cv::imshow(camera.windowName, result.display);
+      }
+      if (!options.noWindow && gridWindow) {
+        cameraFrames.push_back({camera.index, camera.frameNo, camera.cap.get(cv::CAP_PROP_FPS), std::move(result)});
       }
     }
 
     if (!options.noWindow) {
+      if (gridWindow) {
+        cv::Mat mosaic = composeMosaic(cameraFrames, options.tileWidth);
+        if (!mosaic.empty()) cv::imshow(controlsWindowName, mosaic);
+      }
       int key = cv::waitKey(1);
       if (key == 27 || key == 'q' || key == 'Q') break;
       if (key == '+' || key == '=') thresholdTrack = std::min(255, thresholdTrack + 4);
