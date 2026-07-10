@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cerrno>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -56,6 +57,8 @@ struct Options {
   bool angleCsv = false;
   int tcpPort = 0;
   int udpPort = 0;
+  std::string udpTargetHost;
+  int udpTargetPort = 0;
 };
 
 struct Marker {
@@ -690,18 +693,29 @@ class TelemetryServer {
   bool startUdp(int port) {
     udpFd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (udpFd_ < 0) return false;
-    int opt = 1;
-    ::setsockopt(udpFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(static_cast<uint16_t>(port));
-    if (::bind(udpFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-      ::close(udpFd_);
-      udpFd_ = -1;
-      return false;
+    if (port > 0) {
+      int opt = 1;
+      ::setsockopt(udpFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+      sockaddr_in addr{};
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = INADDR_ANY;
+      addr.sin_port = htons(static_cast<uint16_t>(port));
+      if (::bind(udpFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        ::close(udpFd_);
+        udpFd_ = -1;
+        return false;
+      }
     }
     setNonBlocking(udpFd_);
+    return true;
+  }
+
+  bool addUdpTarget(const std::string& host, int port) {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) return false;
+    addUdpSubscriber(addr, "udp target added ");
     return true;
   }
 
@@ -759,13 +773,17 @@ class TelemetryServer {
       socklen_t len = sizeof(srcAddr);
       ssize_t n = ::recvfrom(udpFd_, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&srcAddr), &len);
       if (n < 0) break;
-      const uint64_t key = (static_cast<uint64_t>(srcAddr.sin_addr.s_addr) << 16) | ntohs(srcAddr.sin_port);
-      if (udpSubscriberKeys_.insert(key).second) {
-        udpSubscribers_.push_back(srcAddr);
-        std::cerr << "telemetry: udp subscriber added " << inet_ntoa(srcAddr.sin_addr)
-                  << ":" << ntohs(srcAddr.sin_port)
-                  << " (total " << udpSubscribers_.size() << ")\n";
-      }
+      addUdpSubscriber(srcAddr, "udp subscriber added ");
+    }
+  }
+
+  void addUdpSubscriber(const sockaddr_in& addr, const char* label) {
+    const uint64_t key = (static_cast<uint64_t>(addr.sin_addr.s_addr) << 16) | ntohs(addr.sin_port);
+    if (udpSubscriberKeys_.insert(key).second) {
+      udpSubscribers_.push_back(addr);
+      std::cerr << "telemetry: " << label << inet_ntoa(addr.sin_addr)
+                << ":" << ntohs(addr.sin_port)
+                << " (total " << udpSubscribers_.size() << ")\n";
     }
   }
 
@@ -786,10 +804,14 @@ class TelemetryServer {
   }
 
   void broadcastUdp(const std::string& payload) {
-    if (udpSubscribers_.empty()) return;
+    if (udpFd_ < 0 || udpSubscribers_.empty()) return;
     for (const auto& addr : udpSubscribers_) {
-      ::sendto(udpFd_, payload.data(), payload.size(), 0,
-                reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+      ssize_t sent = ::sendto(udpFd_, payload.data(), payload.size(), 0,
+                              reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+      if (sent < 0 && !udpSendErrorLogged_) {
+        udpSendErrorLogged_ = true;
+        std::cerr << "telemetry: udp send failed: " << std::strerror(errno) << "\n";
+      }
     }
   }
 
@@ -798,7 +820,16 @@ class TelemetryServer {
   std::vector<int> tcpClients_;
   std::vector<sockaddr_in> udpSubscribers_;
   std::set<uint64_t> udpSubscriberKeys_;
+  bool udpSendErrorLogged_ = false;
 };
+
+bool parseHostPort(const std::string& value, std::string& host, int& port) {
+  size_t sep = value.rfind(':');
+  if (sep == std::string::npos || sep == 0 || sep + 1 >= value.size()) return false;
+  host = value.substr(0, sep);
+  port = std::atoi(value.substr(sep + 1).c_str());
+  return port > 0 && port <= 65535;
+}
 
 void printUsage(const char* name) {
   std::cerr
@@ -829,14 +860,16 @@ void printUsage(const char* name) {
       << "  --tcp-port N          serve telemetry JSON to any TCP client on port N\n"
       << "  --udp-port N          serve telemetry JSON to UDP clients that send a\n"
       << "                        subscribe datagram (any bytes) to port N\n"
+      << "  --udp-target H:P      send telemetry JSON over UDP to IPv4 host H, port P\n"
       << "\n"
       << "Telemetry (--tcp-port / --udp-port), one shared port for all cameras:\n"
       << "  Each processed frame emits one JSON line, e.g.:\n"
       << "    {\"ts_ms\":1731093012345,\"camera\":0,\"frame\":42,\"angle\":187.512400,\n"
       << "     \"pairs\":9,\"expected_pairs\":10,\"markers\":18,\"elapsed_ms\":6}\n"
       << "  TCP: connect and read newline-delimited JSON, e.g. `nc HOST PORT`.\n"
-      << "  UDP: send any datagram to subscribe, e.g. `echo -n hi | nc -u -w0 HOST PORT`,\n"
-      << "       then listen on the ephemeral source port you sent from.\n"
+      << "  UDP target: actively send packets, e.g. `--udp-target 127.0.0.1:5001`.\n"
+      << "  UDP subscribe: bind a client port, send any datagram to --udp-port, then\n"
+      << "       receive replies on that same client port; see udp_reader.py.\n"
       << "\n"
       << "Runtime keys in the preview window:\n"
       << "  q/Esc quit, +/- threshold, [/] process FPS, t fixed threshold,\n"
@@ -910,6 +943,9 @@ bool parseArgs(int argc, char** argv, Options& options) {
       if (!readInt(options.tcpPort)) return false;
     } else if (arg == "--udp-port") {
       if (!readInt(options.udpPort)) return false;
+    } else if (arg == "--udp-target") {
+      if (i + 1 >= argc) return false;
+      if (!parseHostPort(argv[++i], options.udpTargetHost, options.udpTargetPort)) return false;
     } else if (arg == "--help" || arg == "-h") {
       printUsage(argv[0]);
       std::exit(0);
@@ -988,16 +1024,30 @@ int main(int argc, char** argv) {
       options.tcpPort = 0;
     }
   }
-  if (options.udpPort > 0) {
+  if (options.udpPort > 0 || options.udpTargetPort > 0) {
     if (telemetry.startUdp(options.udpPort)) {
-      std::cerr << "telemetry: udp listening on port " << options.udpPort
-                << " (clients subscribe by sending any datagram)\n";
+      if (options.udpPort > 0) {
+        std::cerr << "telemetry: udp listening on port " << options.udpPort
+                  << " (clients subscribe by sending any datagram)\n";
+      } else {
+        std::cerr << "telemetry: udp output socket ready\n";
+      }
+      if (options.udpTargetPort > 0) {
+        if (!telemetry.addUdpTarget(options.udpTargetHost, options.udpTargetPort)) {
+          std::cerr << "telemetry: invalid UDP target " << options.udpTargetHost
+                    << ":" << options.udpTargetPort << "\n";
+          options.udpTargetPort = 0;
+        }
+      }
     } else {
-      std::cerr << "telemetry: failed to start UDP server on port " << options.udpPort << "\n";
+      std::cerr << "telemetry: failed to start UDP socket";
+      if (options.udpPort > 0) std::cerr << " on port " << options.udpPort;
+      std::cerr << "\n";
       options.udpPort = 0;
+      options.udpTargetPort = 0;
     }
   }
-  const bool telemetryEnabled = options.tcpPort > 0 || options.udpPort > 0;
+  const bool telemetryEnabled = options.tcpPort > 0 || options.udpPort > 0 || options.udpTargetPort > 0;
 
   const bool gridWindow = cameras.size() > 1 && !options.separateWindows;
   const std::string controlsWindowName = gridWindow
@@ -1085,13 +1135,13 @@ int main(int argc, char** argv) {
                     << result.elapsedMs << "\n";
         } else if (!options.angleLine) {
           std::cout << "cam=" << camera.index
-                    << " frame=" << camera.frameNo
-                    << " ms=" << result.elapsedMs
-                    << " markers=" << result.markers.size()
-                    << " pairs=" << result.pairs.size() << "/" << options.expectedPairs
-                    << " angle=" << formatAngle(result.upAngle, 6)
-                    << " ids=" << ids.str();
-          if (!result.thresholdSummary.empty()) std::cout << " " << result.thresholdSummary;
+                    << "\t\tframe=" << camera.frameNo
+                    << "\t\tms=" << result.elapsedMs
+                    << "\t\tmarkers=" << result.markers.size()
+                    << "\t\tpairs=" << result.pairs.size() << "/" << options.expectedPairs
+                    << "\t\tangle=" << formatAngle(result.upAngle, 6)
+                    << "\t\tids=" << ids.str();
+          if (!result.thresholdSummary.empty()) std::cout << "\t\t" << result.thresholdSummary;
           std::cout << std::endl;
         }
       }
@@ -1117,7 +1167,7 @@ int main(int argc, char** argv) {
     if (options.angleLine && !angleParts.empty()) {
       std::cout << "\r";
       for (size_t i = 0; i < angleParts.size(); ++i) {
-        if (i) std::cout << "  ";
+        if (i) std::cout << "\t\t";
         std::cout << angleParts[i];
       }
       std::cout << "        " << std::flush;
