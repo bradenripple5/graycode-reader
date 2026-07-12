@@ -31,12 +31,21 @@ namespace {
 constexpr int kAngleSlotCount = 20;
 constexpr int kBestThresholdIterations = 6;
 
+enum class ReaderMode {
+  FIDUCIAL,
+  COLOR_LINE,
+};
+
 struct Options {
   int camera = 0;
   std::vector<int> cameras;
+  int maxCameraIndex = 16;
+  ReaderMode readerMode = ReaderMode::FIDUCIAL;
   int width = 1280;
   int height = 720;
   int downscale = 640;
+  int colorLineCropPercent = 34;
+  bool colorLineRadialScans = false;
   int expectedPairs = 10;
   int threshold = 128;
   int tileWidth = 0;
@@ -51,6 +60,7 @@ struct Options {
   bool autoThreshold = false;
   bool bestThreshold = false;
   bool simpleCross = true;
+  bool robustColor = false;
   bool noWindow = false;
   bool separateWindows = false;
   bool angleLine = false;
@@ -103,8 +113,60 @@ struct FrameResult {
   std::vector<Marker> markers;
   std::vector<Pair> pairs;
   std::optional<double> upAngle;
+  std::optional<double> stripeAngle;
+  std::optional<double> imageNormalAngle;
+  cv::Rect analysisRect;
   std::string thresholdSummary;
   long elapsedMs = 0;
+};
+
+enum class ColorClass {
+  NONE,
+  RED,
+  YELLOW,
+  BLUE,
+};
+
+struct ColorSample {
+  int pos = 0;
+  ColorClass color = ColorClass::NONE;
+};
+
+struct ColorRun {
+  ColorClass color = ColorClass::NONE;
+  int start = 0;
+  int end = 0;
+  int count = 0;
+  double center = 0.0;
+};
+
+struct ColorScan {
+  std::string axis;
+  std::string label;
+  double angleDeg = 0.0;
+  cv::Point2d vector;
+  std::vector<ColorRun> runs;
+  int direction = 0;
+  int votes = 0;
+  int score = 0;
+  double medianLength = 0.0;
+  bool hasGap = false;
+  bool isSolid = false;
+  int maxGap = 0;
+  double gapThreshold = 0.0;
+  double solidCoverage = 0.0;
+};
+
+struct ColorLineFit {
+  double imageNormalAngle = 0.0;
+  double rawAngle = 0.0;
+  double angle = 0.0;
+  double stripeAngle = 0.0;
+  double maxCoverageGap = 0.0;
+  double coverageCondition = 0.0;
+  std::vector<ColorScan> allScans;
+  std::vector<ColorScan> fittedScans;
+  std::vector<ColorScan> excludedScans;
 };
 
 struct CameraFrame {
@@ -118,6 +180,10 @@ double normalizeDeg(double value) {
   double result = std::fmod(value, 360.0);
   if (result < 0.0) result += 360.0;
   return result;
+}
+
+double detectedColorLineAngleFromRaw(double rawAngle) {
+  return normalizeDeg(rawAngle + 90.0);
 }
 
 cv::Point2f markerCenter(const Marker& marker) {
@@ -484,6 +550,313 @@ ThresholdPass findBestThresholdPass(const cv::Mat& frame, const Options& options
   return best;
 }
 
+ColorClass classifyColorLinePixel(const cv::Vec3b& bgr, bool robustColor) {
+  const double b = bgr[0];
+  const double g = bgr[1];
+  const double r = bgr[2];
+  const double maxValue = std::max({r, g, b});
+  const double minValue = std::min({r, g, b});
+  const double minBrightness = robustColor ? 18.0 : 24.0;
+  const double minScore = robustColor ? 1.10 : 1.25;
+  const double minMargin = robustColor ? 1.04 : 1.10;
+  if (maxValue < minBrightness || maxValue - minValue < 6.0) return ColorClass::NONE;
+
+  const double redScore = r / (g + b + 1.0);
+  const double blueScore = b / (r + g + 1.0);
+  const double yellowScore = std::min(r, g) / (b + std::abs(r - g) + 1.0);
+
+  ColorClass bestColor = ColorClass::RED;
+  double bestScore = redScore;
+  double secondScore = std::max(yellowScore, blueScore);
+  if (yellowScore > bestScore) {
+    bestColor = ColorClass::YELLOW;
+    bestScore = yellowScore;
+    secondScore = std::max(redScore, blueScore);
+  }
+  if (blueScore > bestScore) {
+    bestColor = ColorClass::BLUE;
+    bestScore = blueScore;
+    secondScore = std::max(redScore, yellowScore);
+  }
+
+  if (bestScore < minScore || bestScore < secondScore * minMargin) return ColorClass::NONE;
+  return bestColor;
+}
+
+const char* colorClassName(ColorClass color) {
+  switch (color) {
+    case ColorClass::RED: return "red";
+    case ColorClass::YELLOW: return "yellow";
+    case ColorClass::BLUE: return "blue";
+    default: return "none";
+  }
+}
+
+int borderDirection(ColorClass left, ColorClass right) {
+  if ((left == ColorClass::RED && right == ColorClass::YELLOW) ||
+      (left == ColorClass::YELLOW && right == ColorClass::BLUE) ||
+      (left == ColorClass::BLUE && right == ColorClass::RED)) {
+    return 1;
+  }
+  if ((left == ColorClass::YELLOW && right == ColorClass::RED) ||
+      (left == ColorClass::BLUE && right == ColorClass::YELLOW) ||
+      (left == ColorClass::RED && right == ColorClass::BLUE)) {
+    return -1;
+  }
+  return 0;
+}
+
+double medianRunLength(const std::vector<ColorRun>& runs) {
+  if (runs.empty()) return 0.0;
+  std::vector<int> lengths;
+  const int begin = runs.size() >= 3 ? 1 : 0;
+  const int end = runs.size() >= 3 ? static_cast<int>(runs.size()) - 1 : static_cast<int>(runs.size());
+  for (int i = begin; i < end; ++i) {
+    if (runs[i].count >= 3) lengths.push_back(runs[i].count);
+  }
+  if (lengths.empty()) return 0.0;
+  std::sort(lengths.begin(), lengths.end());
+  return static_cast<double>(lengths[lengths.size() / 2]);
+}
+
+std::vector<ColorRun> compressColorRuns(const std::vector<ColorSample>& samples) {
+  std::vector<ColorRun> runs;
+  for (const auto& sample : samples) {
+    if (sample.color == ColorClass::NONE) continue;
+    if (!runs.empty() && runs.back().color == sample.color && sample.pos <= runs.back().end + 1) {
+      runs.back().end = sample.pos;
+      runs.back().count++;
+    } else {
+      runs.push_back({sample.color, sample.pos, sample.pos, 1, static_cast<double>(sample.pos)});
+    }
+  }
+
+  std::vector<ColorRun> filtered;
+  for (auto run : runs) {
+    if (run.count < 3) continue;
+    run.center = (run.start + run.end) / 2.0;
+    filtered.push_back(run);
+  }
+  return filtered;
+}
+
+void populateColorScanStats(ColorScan& scan, const std::vector<ColorSample>& samples) {
+  scan.runs = compressColorRuns(samples);
+  for (size_t i = 1; i < scan.runs.size(); ++i) {
+    const int direction = borderDirection(scan.runs[i - 1].color, scan.runs[i].color);
+    if (direction == 0) continue;
+    scan.score += direction;
+    scan.votes++;
+  }
+  scan.direction = scan.score > 0 ? 1 : scan.score < 0 ? -1 : 0;
+  scan.medianLength = medianRunLength(scan.runs);
+  if (!samples.empty() && scan.runs.size() == 1) {
+    scan.solidCoverage = static_cast<double>(scan.runs.front().count) / samples.size();
+    scan.isSolid = scan.solidCoverage >= 0.7;
+  }
+
+  if (scan.runs.size() < 2) return;
+  scan.gapThreshold = std::max(6.0, scan.medianLength * 0.45);
+  int currentGap = 0;
+  const int first = scan.runs.front().start;
+  const int last = scan.runs.back().end;
+  for (const auto& sample : samples) {
+    if (sample.pos < first || sample.pos > last) continue;
+    if (sample.color != ColorClass::NONE) {
+      scan.maxGap = std::max(scan.maxGap, currentGap);
+      currentGap = 0;
+    } else {
+      currentGap++;
+    }
+  }
+  scan.maxGap = std::max(scan.maxGap, currentGap);
+  scan.hasGap = scan.maxGap >= scan.gapThreshold;
+}
+
+ColorScan scanColorLineRadial(const cv::Mat& image, double angleDeg, const Options& options) {
+  const double radians = angleDeg * CV_PI / 180.0;
+  const double ux = std::cos(radians);
+  const double uy = std::sin(radians);
+  const double cx = (image.cols - 1) / 2.0;
+  const double cy = (image.rows - 1) / 2.0;
+  const double halfWidth = (image.cols - 1) / 2.0;
+  const double halfHeight = (image.rows - 1) / 2.0;
+  const double xLimit = std::abs(ux) < 1e-9 ? std::numeric_limits<double>::infinity() : halfWidth / std::abs(ux);
+  const double yLimit = std::abs(uy) < 1e-9 ? std::numeric_limits<double>::infinity() : halfHeight / std::abs(uy);
+  const double maxT = std::min(xLimit, yLimit);
+
+  std::vector<ColorSample> samples;
+  int lastX = -1;
+  int lastY = -1;
+  int pos = 0;
+  for (double t = -maxT; t <= maxT; t += 1.0) {
+    const int x = std::clamp(static_cast<int>(std::round(cx + ux * t)), 0, image.cols - 1);
+    const int y = std::clamp(static_cast<int>(std::round(cy + uy * t)), 0, image.rows - 1);
+    if (x == lastX && y == lastY) continue;
+    lastX = x;
+    lastY = y;
+    samples.push_back({pos++, classifyColorLinePixel(image.at<cv::Vec3b>(y, x), options.robustColor)});
+  }
+
+  ColorScan scan;
+  scan.angleDeg = angleDeg;
+  std::ostringstream axis;
+  axis << "radial" << std::fixed << std::setprecision(angleDeg == std::round(angleDeg) ? 0 : 1) << angleDeg;
+  scan.axis = axis.str();
+  std::ostringstream label;
+  label << std::fixed << std::setprecision(angleDeg == std::round(angleDeg) ? 0 : 1) << angleDeg << "deg";
+  scan.label = label.str();
+  scan.vector = {ux, uy};
+  populateColorScanStats(scan, samples);
+  return scan;
+}
+
+bool colorScanIsUsable(const ColorScan& scan) {
+  return scan.medianLength > 0.0 && scan.direction != 0 && !scan.hasGap;
+}
+
+bool colorScanIsConstraint(const ColorScan& scan) {
+  return colorScanIsUsable(scan) || (scan.isSolid && !scan.hasGap);
+}
+
+std::optional<std::pair<double, double>> colorScanCoverage(const std::vector<ColorScan>& constraints) {
+  if (constraints.size() < 2) return std::nullopt;
+  std::vector<double> angles;
+  for (const auto& scan : constraints) angles.push_back(std::fmod(normalizeDeg(scan.angleDeg), 180.0));
+  std::sort(angles.begin(), angles.end());
+
+  double maxGap = 0.0;
+  for (size_t i = 0; i < angles.size(); ++i) {
+    const double next = i + 1 == angles.size() ? angles.front() + 180.0 : angles[i + 1];
+    maxGap = std::max(maxGap, next - angles[i]);
+  }
+
+  double aa = 0.0;
+  double ab = 0.0;
+  double bb = 0.0;
+  for (const auto& scan : constraints) {
+    aa += scan.vector.x * scan.vector.x;
+    ab += scan.vector.x * scan.vector.y;
+    bb += scan.vector.y * scan.vector.y;
+  }
+  const double trace = aa + bb;
+  const double det = aa * bb - ab * ab;
+  if (det <= 1e-9) return std::nullopt;
+  const double root = std::sqrt(std::max(0.0, trace * trace - 4.0 * det));
+  const double lambdaMax = (trace + root) / 2.0;
+  const double lambdaMin = (trace - root) / 2.0;
+  const double condition = lambdaMin > 1e-9 ? lambdaMax / lambdaMin : std::numeric_limits<double>::infinity();
+  if (condition > 8.0) return std::nullopt;
+  return std::make_pair(maxGap, condition);
+}
+
+std::optional<ColorLineFit> fitColorLineFromScans(const std::vector<ColorScan>& scans) {
+  std::vector<ColorScan> usable;
+  std::vector<ColorScan> constraints;
+  std::vector<ColorScan> excluded;
+  for (const auto& scan : scans) {
+    if (colorScanIsUsable(scan)) usable.push_back(scan);
+    if (colorScanIsConstraint(scan)) {
+      constraints.push_back(scan);
+    } else {
+      excluded.push_back(scan);
+    }
+  }
+  if (usable.empty() || constraints.size() < 2) return std::nullopt;
+  auto coverage = colorScanCoverage(constraints);
+  if (!coverage) return std::nullopt;
+
+  double aa = 0.0;
+  double ab = 0.0;
+  double bb = 0.0;
+  double ac = 0.0;
+  double bc = 0.0;
+  for (const auto& scan : constraints) {
+    const double projection = scan.isSolid ? 0.0 : scan.direction / scan.medianLength;
+    aa += scan.vector.x * scan.vector.x;
+    ab += scan.vector.x * scan.vector.y;
+    bb += scan.vector.y * scan.vector.y;
+    ac += scan.vector.x * projection;
+    bc += scan.vector.y * projection;
+  }
+
+  const double det = aa * bb - ab * ab;
+  if (std::abs(det) < 1e-9) return std::nullopt;
+  const double nx = (ac * bb - bc * ab) / det;
+  const double ny = (aa * bc - ab * ac) / det;
+  if (!std::isfinite(nx) || !std::isfinite(ny) || (nx == 0.0 && ny == 0.0)) return std::nullopt;
+
+  ColorLineFit fit;
+  fit.allScans = scans;
+  fit.fittedScans = constraints;
+  fit.excludedScans = excluded;
+  fit.maxCoverageGap = coverage->first;
+  fit.coverageCondition = coverage->second;
+  fit.imageNormalAngle = normalizeDeg(std::atan2(ny, nx) * 180.0 / CV_PI);
+  fit.rawAngle = normalizeDeg(360.0 - fit.imageNormalAngle);
+  fit.angle = detectedColorLineAngleFromRaw(fit.rawAngle);
+  fit.stripeAngle = normalizeDeg(fit.rawAngle + 90.0);
+  return fit;
+}
+
+std::string colorLineScanSummary(const std::vector<ColorScan>& scans) {
+  std::ostringstream out;
+  for (size_t i = 0; i < scans.size(); ++i) {
+    if (i) out << "; ";
+    out << scans[i].label << "=";
+    if (scans[i].hasGap) {
+      out << "gap " << scans[i].maxGap << "px";
+    } else if (!colorScanIsUsable(scans[i])) {
+      out << "unusable";
+    } else {
+      for (const auto& run : scans[i].runs) out << colorClassName(run.color)[0];
+    }
+  }
+  return out.str();
+}
+
+FrameResult processColorLineFrame(const cv::Mat& frame, const Options& options) {
+  auto start = std::chrono::steady_clock::now();
+  double scale = static_cast<double>(options.downscale) / frame.cols;
+  cv::Mat preview;
+  cv::resize(frame, preview, cv::Size(options.downscale, std::max(1, static_cast<int>(std::round(frame.rows * scale)))));
+
+  FrameResult result;
+  result.display = preview.clone();
+  const int cropPercent = std::clamp(options.colorLineCropPercent, 5, 100);
+  const int squareSize = std::max(2, static_cast<int>(std::round((cropPercent / 100.0) * std::min(preview.cols, preview.rows))));
+  const int left = std::max(0, (preview.cols - squareSize) / 2);
+  const int top = std::max(0, (preview.rows - squareSize) / 2);
+  result.analysisRect = cv::Rect(left, top, std::min(squareSize, preview.cols - left), std::min(squareSize, preview.rows - top));
+
+  static const std::vector<double> twoLineScanAngles = {0.0, 90.0};
+  static const std::vector<double> radialScanAngles = {0.0, 22.5, 45.0, 67.5, 90.0, 112.5, 135.0, 157.5};
+  const auto& scanAngles = options.colorLineRadialScans ? radialScanAngles : twoLineScanAngles;
+  cv::Mat crop = preview(result.analysisRect).clone();
+  std::vector<ColorScan> scans;
+  for (double angle : scanAngles) scans.push_back(scanColorLineRadial(crop, angle, options));
+
+  auto fit = fitColorLineFromScans(scans);
+  if (fit) {
+    result.upAngle = fit->angle;
+    result.stripeAngle = fit->stripeAngle;
+    result.imageNormalAngle = fit->imageNormalAngle;
+    std::ostringstream summary;
+    summary << (options.colorLineRadialScans ? "color-line radial used " : "color-line two-line used ")
+            << fit->fittedScans.size() << "/" << fit->allScans.size()
+            << " maxGap=" << std::fixed << std::setprecision(1) << fit->maxCoverageGap
+            << " cond=" << fit->coverageCondition
+            << " stripe=" << fit->stripeAngle;
+    result.thresholdSummary = summary.str();
+  } else {
+    result.thresholdSummary = "color-line no fit: " + colorLineScanSummary(scans);
+  }
+
+  result.elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start).count();
+  return result;
+}
+
 void drawCross(cv::Mat& frame, cv::Point2f point, cv::Scalar color, int size = 12) {
   cv::line(frame, {static_cast<int>(point.x - size), static_cast<int>(point.y)},
            {static_cast<int>(point.x + size), static_cast<int>(point.y)}, color, 2);
@@ -493,6 +866,37 @@ void drawCross(cv::Mat& frame, cv::Point2f point, cv::Scalar color, int size = 1
 
 void drawVector(cv::Mat& frame, cv::Point2f from, cv::Point2f to, cv::Scalar color) {
   cv::arrowedLine(frame, from, to, color, 3, cv::LINE_AA, 0, 0.18);
+}
+
+void drawColorLineOverlay(cv::Mat& frame, const FrameResult& result) {
+  if (result.analysisRect.empty()) return;
+  cv::rectangle(frame, result.analysisRect, {0, 255, 255}, 2, cv::LINE_AA);
+  const cv::Point2f center(result.analysisRect.x + result.analysisRect.width * 0.5f,
+                           result.analysisRect.y + result.analysisRect.height * 0.5f);
+  const double len = std::max(result.analysisRect.width, result.analysisRect.height) * 0.65;
+
+  if (result.imageNormalAngle) {
+    const double normalRadians = *result.imageNormalAngle * CV_PI / 180.0;
+    const double stripeRadians = normalRadians + CV_PI / 2.0;
+    cv::Point2f stripeDelta(static_cast<float>(std::cos(stripeRadians) * len),
+                            static_cast<float>(std::sin(stripeRadians) * len));
+    cv::line(frame, center - stripeDelta, center + stripeDelta, {255, 255, 0}, 3, cv::LINE_AA);
+
+    cv::Point2f normalDelta(static_cast<float>(std::cos(normalRadians) * len * 0.55),
+                            static_cast<float>(std::sin(normalRadians) * len * 0.55));
+    cv::arrowedLine(frame, center, center + normalDelta, {255, 0, 255}, 3, cv::LINE_AA, 0, 0.18);
+  }
+
+  std::ostringstream label;
+  label << "color-line: ";
+  if (result.upAngle) {
+    label << std::fixed << std::setprecision(2) << *result.upAngle << " deg";
+  } else {
+    label << "no angle";
+  }
+  const int baselineY = std::max(18, result.analysisRect.y - 8);
+  cv::putText(frame, label.str(), {result.analysisRect.x + 6, baselineY},
+              cv::FONT_HERSHEY_SIMPLEX, 0.55, {0, 255, 255}, 2, cv::LINE_AA);
 }
 
 void drawOverlay(cv::Mat& frame, const std::vector<Marker>& markers, const std::vector<Pair>& pairs,
@@ -560,6 +964,8 @@ cv::Mat composeMosaic(const std::vector<CameraFrame>& frames, int requestedTileW
 }
 
 FrameResult processCameraFrame(const cv::Mat& frame, const Options& options) {
+  if (options.readerMode == ReaderMode::COLOR_LINE) return processColorLineFrame(frame, options);
+
   auto start = std::chrono::steady_clock::now();
   double scale = static_cast<double>(options.downscale) / frame.cols;
   cv::Mat preview;
@@ -614,6 +1020,21 @@ std::vector<int> parseCameraList(const std::string& value) {
   while (std::getline(stream, item, ',')) {
     if (item.empty()) continue;
     cameras.push_back(std::atoi(item.c_str()));
+  }
+  return cameras;
+}
+
+std::vector<int> detectConnectedCameras(int maxCameraIndex) {
+  std::vector<int> cameras;
+  for (int cameraIndex = 0; cameraIndex <= maxCameraIndex; ++cameraIndex) {
+    cv::VideoCapture cap(cameraIndex, cv::CAP_V4L2);
+    if (!cap.isOpened()) continue;
+
+    cv::Mat frame;
+    if (cap.read(frame) && !frame.empty()) {
+      cameras.push_back(cameraIndex);
+      std::cerr << "Detected camera index " << cameraIndex << "\n";
+    }
   }
   return cameras;
 }
@@ -834,13 +1255,18 @@ bool parseHostPort(const std::string& value, std::string& host, int& port) {
 void printUsage(const char* name) {
   std::cerr
       << "Usage: " << name << " [options]\n"
-      << "  --camera N            V4L camera index (default 0)\n"
+      << "  --camera N            V4L camera index; overrides auto detection\n"
       << "  --cameras A,B,C       open multiple V4L camera indices\n"
+      << "  --max-camera-index N  highest V4L index to probe for auto detection (default 16)\n"
       << "  --width N             capture width (default 1280)\n"
       << "  --height N            capture height (default 720)\n"
       << "  --fps N               requested camera capture FPS\n"
       << "  --process-fps N       throttle detector loop FPS; 0 = unlimited\n"
       << "  --downscale N         processing width (default 640)\n"
+      << "  --color-line-reader   use color_line_reader two-line scan algorithm\n"
+      << "  --color-line-crop N   centered square crop percent for color-line mode (default 34)\n"
+      << "  --color-line-radial   use 8 radial scanlines instead of stable 2-line mode\n"
+      << "  --robust-color        use color_line_reader robust color thresholds\n"
       << "  --tile-width N        grid display tile width; 0 = auto\n"
       << "  --expected-pairs N    expected printed pairs (default 10)\n"
       << "  --threshold N         fixed threshold 0..255\n"
@@ -880,6 +1306,7 @@ void printUsage(const char* name) {
 }
 
 bool parseArgs(int argc, char** argv, Options& options) {
+  bool explicitCameras = false;
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
     auto readInt = [&](int& target) {
@@ -894,9 +1321,13 @@ bool parseArgs(int argc, char** argv, Options& options) {
     };
     if (arg == "--camera") {
       if (!readInt(options.camera)) return false;
+      explicitCameras = true;
     } else if (arg == "--cameras") {
       if (i + 1 >= argc) return false;
       options.cameras = parseCameraList(argv[++i]);
+      explicitCameras = true;
+    } else if (arg == "--max-camera-index") {
+      if (!readInt(options.maxCameraIndex)) return false;
     } else if (arg == "--width") {
       if (!readInt(options.width)) return false;
     } else if (arg == "--height") {
@@ -907,6 +1338,14 @@ bool parseArgs(int argc, char** argv, Options& options) {
       if (!readDouble(options.processFps)) return false;
     } else if (arg == "--downscale") {
       if (!readInt(options.downscale)) return false;
+    } else if (arg == "--color-line-reader") {
+      options.readerMode = ReaderMode::COLOR_LINE;
+    } else if (arg == "--color-line-crop") {
+      if (!readInt(options.colorLineCropPercent)) return false;
+    } else if (arg == "--color-line-radial") {
+      options.colorLineRadialScans = true;
+    } else if (arg == "--robust-color") {
+      options.robustColor = true;
     } else if (arg == "--tile-width") {
       if (!readInt(options.tileWidth)) return false;
     } else if (arg == "--expected-pairs") {
@@ -956,13 +1395,15 @@ bool parseArgs(int argc, char** argv, Options& options) {
   }
   options.threshold = std::clamp(options.threshold, 0, 255);
   options.downscale = std::max(1, options.downscale);
+  options.colorLineCropPercent = std::clamp(options.colorLineCropPercent, 5, 100);
   options.tileWidth = std::max(0, options.tileWidth);
   options.expectedPairs = std::max(1, options.expectedPairs);
   options.printEvery = std::max(1, options.printEvery);
   options.processFps = std::max(0.0, options.processFps);
   options.tcpPort = std::max(0, options.tcpPort);
   options.udpPort = std::max(0, options.udpPort);
-  if (options.cameras.empty()) options.cameras.push_back(options.camera);
+  options.maxCameraIndex = std::max(0, options.maxCameraIndex);
+  if (explicitCameras && options.cameras.empty()) options.cameras.push_back(options.camera);
   return true;
 }
 
@@ -981,6 +1422,10 @@ int main(int argc, char** argv) {
   if (!parseArgs(argc, argv, options)) {
     printUsage(argv[0]);
     return 2;
+  }
+
+  if (options.cameras.empty()) {
+    options.cameras = detectConnectedCameras(options.maxCameraIndex);
   }
 
   std::vector<CameraState> cameras;
@@ -1148,14 +1593,20 @@ int main(int argc, char** argv) {
       camera.frameNo++;
 
       if (!options.noWindow) {
-        drawOverlay(result.display, result.markers, result.pairs, result.upAngle, options.expectedPairs);
+        if (options.readerMode == ReaderMode::COLOR_LINE) {
+          drawColorLineOverlay(result.display, result);
+        } else {
+          drawOverlay(result.display, result.markers, result.pairs, result.upAngle, options.expectedPairs);
+        }
         std::ostringstream hud;
         hud << "cam " << camera.index
             << " | cap " << camera.cap.get(cv::CAP_PROP_FPS)
             << " fps | proc " << (options.processFps > 0.0 ? std::to_string(options.processFps) : "max")
             << " | t=" << options.threshold
             << " | angle=" << formatAngle(result.upAngle, 2)
-            << " | mode=" << (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw")));
+            << " | mode=" << (options.readerMode == ReaderMode::COLOR_LINE
+                ? "color-line"
+                : (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw"))));
         cv::putText(result.display, hud.str(), {12, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 2, cv::LINE_AA);
         if (!gridWindow) cv::imshow(camera.windowName, result.display);
       }
