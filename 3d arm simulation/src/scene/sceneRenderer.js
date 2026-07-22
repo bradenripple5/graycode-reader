@@ -46,11 +46,17 @@ const syncRobotButton = document.getElementById("sync-robot");
 const syncStatus = document.getElementById("sync-status");
 const resetCameraButton = document.getElementById("reset-camera");
 const autoZoomOutButton = document.getElementById("auto-zoom-out");
+const toggleAccelerometerVectorsButton = document.getElementById("toggle-accelerometer-vectors");
+const accelerometerVectorScaleInput = document.getElementById("accelerometer-vector-scale");
+const accelerometerVectorScaleValue = document.getElementById("accelerometer-vector-scale-value");
+const accelerometer3dLegend = document.getElementById("accelerometer-3d-legend");
 const cycleGantryFocusButton = document.getElementById("cycle-gantry-focus");
 const calibrateCurrentButton = document.getElementById("calibrate-current");
 const moveCalibrationPoseButton = document.getElementById("move-calibration-pose");
 const finishCalibrationButton = document.getElementById("finish-calibration");
 const calibrationCoverage = document.getElementById("calibration-coverage");
+const calibrationCompletionMessage = document.getElementById("calibration-completion-message");
+const clearLoadedCalibrationButton = document.getElementById("clear-loaded-calibration");
 const uncalibrateCurrentButton = document.getElementById("uncalibrate-current");
 const calibrationSourceSelect = document.getElementById("calibration-source");
 const calibrationStatus = document.getElementById("calibration-status");
@@ -98,12 +104,18 @@ let collisionState = {
   messages: [],
 };
 const JOINT_STATE_FRESHNESS_SEC = 2.5;
-const STATUS_POLL_INTERVAL_MS = 250;
+const configuredStatusPollIntervalMs = Number(import.meta.env.VITE_STATUS_POLL_INTERVAL_MS);
+const STATUS_POLL_INTERVAL_MS = Number.isInteger(configuredStatusPollIntervalMs)
+  && configuredStatusPollIntervalMs > 0
+  ? configuredStatusPollIntervalMs
+  : 3000;
 const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || "")
   .trim()
   .replace(/\/+$/, "");
 const DEMO_NO_BACKEND = String(import.meta.env.VITE_DEMO_NO_BACKEND || "").toLowerCase() === "true";
 const CALIBRATION_JOINTS = ["base", "shoulder", "elbow", "wrist"];
+const CALIBRATION_ROW_SELECTION_STORAGE_KEY = "bcr.loaded-calibration-row-ids.v1";
+const DEFAULT_CAMERA_FEEDS = [0];
 const AUTO_CALIBRATION_SETTLE_MS = 350;
 const UDP_ARM_CHANGE_EPSILON_DEG = 0.2;
 const UDP_TO_ARM_JOINTS = {
@@ -118,6 +130,17 @@ const DEFAULT_CALIBRATION_TARGETS_DEG = {
   elbow: 0,
   wrist: 0,
 };
+const ACCELEROMETER_3D_CONFIG = {
+  "dual:0x68": { joint: "shoulder", jointIndex: 1, position: [0, 0.11, 0.035], rotation: [0, 0, 0] },
+  "dual:0x69": { joint: "elbow", jointIndex: 3, position: [0, 0.11, 0.035], rotation: [0, 0, 0] },
+  "single:0x68": { joint: "wrist", jointIndex: 5, position: [0, 0.11, 0.035], rotation: [0, 0, 0] },
+};
+const ACCELEROMETER_VECTOR_COLORS = {
+  x: 0xff4d4d,
+  y: 0x55dd77,
+  z: 0x4da3ff,
+  resultant: 0xffe45c,
+};
 let lastAppliedUdpAngles = null;
 let calibratedUdpReferenceAngles = null;
 let calibratedTargetAngles = { ...DEFAULT_CALIBRATION_TARGETS_DEG };
@@ -125,12 +148,24 @@ let calibratedReferenceId = null;
 let calibratedSensorModels = null;
 let calibrationEventSource = null;
 const calibrationSnapshots = new Map();
+const baseCameraDisplayHistory = {
+  lastFrame: null,
+  samples: [],
+};
+let availableCalibrationRowsCache = [];
 let calibrationRowsCache = [];
+let loadedCalibrationRowIds = loadCalibrationRowSelection();
 let preCalibrationActive = true;
+let sensorControlLocked = false;
+let calibrationCompletionSummary = "";
 let automaticCalibrationCaptureTimer = null;
 let automaticCalibrationCaptureId = 0;
 let automaticCalibrationCaptureInFlight = false;
 let pendingAutomaticCalibrationCapture = null;
+let accelerometerVisualsVisible = true;
+let accelerometerVectorScale = 1;
+const accelerometerVisuals = new Map();
+const accelerometerReadings = new Map();
 
 const ARM_CONFIG = {
   chain: [
@@ -380,20 +415,77 @@ function formatCalibrationNumber(value) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : "n/a";
 }
 
+function formatVectorComponent(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(2) : "n/a";
+}
+
+function calibrationRowSelectionId(row) {
+  return String(row?.id ?? row?.created_at ?? "");
+}
+
+function loadCalibrationRowSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CALIBRATION_ROW_SELECTION_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(saved) ? saved.map(String) : []);
+  } catch (_error) {
+    return new Set();
+  }
+}
+
+function saveCalibrationRowSelection() {
+  try {
+    localStorage.setItem(
+      CALIBRATION_ROW_SELECTION_STORAGE_KEY,
+      JSON.stringify([...loadedCalibrationRowIds])
+    );
+  } catch (_error) {}
+}
+
+function setCalibrationRowLoaded(entry, loaded) {
+  const rowId = calibrationRowSelectionId(entry);
+  if (!rowId) return;
+  if (loaded) {
+    loadedCalibrationRowIds.add(rowId);
+  } else {
+    loadedCalibrationRowIds.delete(rowId);
+  }
+  saveCalibrationRowSelection();
+  renderCalibrationRows(availableCalibrationRowsCache);
+}
+
+function clearLoadedCalibrationRows() {
+  loadedCalibrationRowIds.clear();
+  saveCalibrationRowSelection();
+  renderCalibrationRows(availableCalibrationRowsCache);
+  setSyncStatus("sync-warn", "Loaded calibration readings cleared; saved recordings remain available to check individually.");
+}
+
 function renderCalibrationRows(rows) {
   if (!calibrationRows) {
     return;
   }
-  calibrationRowsCache = [...(rows || [])];
+  availableCalibrationRowsCache = [...(rows || [])];
+  const availableIds = new Set(availableCalibrationRowsCache.map(calibrationRowSelectionId));
+  loadedCalibrationRowIds = new Set(
+    [...loadedCalibrationRowIds].filter((rowId) => availableIds.has(rowId))
+  );
+  saveCalibrationRowSelection();
+  calibrationRowsCache = availableCalibrationRowsCache.filter((entry) => (
+    loadedCalibrationRowIds.has(calibrationRowSelectionId(entry))
+  ));
   calibrationRows.innerHTML = "";
-  if (!rows?.length) {
+  if (!availableCalibrationRowsCache.length) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="11">No calibration poses recorded yet.</td>';
+    row.innerHTML = '<td colspan="12">No calibration poses recorded yet.</td>';
     calibrationRows.appendChild(row);
+    renderCalibrationCoverage(calibrationRowsCache);
     return;
   }
-  [...rows].reverse().forEach((entry) => {
+  [...availableCalibrationRowsCache].reverse().forEach((entry) => {
     const row = document.createElement("tr");
+    const rowId = calibrationRowSelectionId(entry);
+    const loaded = loadedCalibrationRowIds.has(rowId);
+    row.classList.toggle("calibration-row-unloaded", !loaded);
     const createdAt = entry.created_at ? new Date(entry.created_at).toLocaleTimeString() : "";
     const udpAngles = entry.udp_angles_deg || entry.udp_average_deg || {};
     const snapshot = calibrationSnapshots.get(entry.id);
@@ -403,6 +495,7 @@ function renderCalibrationRows(rows) {
       .filter((name) => sensors[name])
       .map((name) => `${name}: ${formatCalibrationNumber(sensors[name]?.angle)}`);
     row.innerHTML = `
+      <td><input class="calibration-load-toggle" type="checkbox" ${loaded ? "checked" : ""} ${sensorControlLocked ? "disabled" : ""} aria-label="Load recording from ${createdAt || rowId} and reload it next time" /></td>
       <td>${snapshot ? `<img class="calibration-snapshot" src="${snapshot}" alt="Recorded arm orientation" />` : "—"}</td>
       <td>${createdAt}</td>
       <td>${formatCalibrationNumber(udpAngles.base)}</td>
@@ -415,15 +508,29 @@ function renderCalibrationRows(rows) {
       <td>${formatCalibrationNumber(entry.targets_deg?.wrist)}</td>
       <td>${CALIBRATION_JOINTS.map((joint) => `${joint}: ${sampleCounts[joint] || 0}`).join("<br>")}${extraSensors.length ? `<hr>${extraSensors.join("<br>")}` : ""}</td>
     `;
+    row.querySelector(".calibration-load-toggle")?.addEventListener("change", (event) => {
+      setCalibrationRowLoaded(entry, event.target.checked);
+    });
     calibrationRows.appendChild(row);
   });
-  renderCalibrationCoverage(rows);
+  renderCalibrationCoverage(calibrationRowsCache);
 }
 
 function renderCalibrationCoverage(rows = calibrationRowsCache) {
   if (!calibrationCoverage) return;
+  if (sensorControlLocked && calibrationCompletionSummary) {
+    calibrationCoverage.textContent = calibrationCompletionSummary;
+    setCalibrationCompletionMessage("sync-ok", calibrationCompletionSummary);
+    return;
+  }
   if (!rows?.length) {
-    calibrationCoverage.textContent = "Record at least three varied orientations to finish calibration.";
+    if (availableCalibrationRowsCache.length) {
+      calibrationCoverage.textContent = `0 loaded · ${availableCalibrationRowsCache.length} saved recording${availableCalibrationRowsCache.length === 1 ? "" : "s"} available. Check Load / reload beside each recording to use it.`;
+      setCalibrationCompletionMessage("sync-warn", "No readings loaded. Check at least three saved recordings.");
+    } else {
+      calibrationCoverage.textContent = "Record at least three varied orientations to finish calibration.";
+      setCalibrationCompletionMessage("sync-warn", "Need three recorded orientations.");
+    }
     return;
   }
   const ranges = CALIBRATION_JOINTS.map((joint) => {
@@ -431,7 +538,45 @@ function renderCalibrationCoverage(rows = calibrationRowsCache) {
     const span = values.length ? Math.max(...values) - Math.min(...values) : 0;
     return `${joint}: ${span.toFixed(0)}° span`;
   });
-  calibrationCoverage.textContent = `${rows.length} pose(s) recorded · ${ranges.join(" · ")}`;
+  calibrationCoverage.textContent = `${rows.length} loaded / ${availableCalibrationRowsCache.length} saved · ${ranges.join(" · ")}`;
+  const readiness = calibrationCompletionReadiness(rows);
+  setCalibrationCompletionMessage(readiness.tone, readiness.message);
+}
+
+function sampledCalibrationJoints(rows) {
+  return CALIBRATION_JOINTS.filter((joint) => (
+    rows.some((row) => (
+      Number(row.sample_counts?.[joint] || 0) > 0
+      && Number.isFinite(Number(row.udp_angles_deg?.[joint]))
+    ))
+  ));
+}
+
+function calibrationCompletionReadiness(rows = calibrationRowsCache) {
+  if (rows.length < 3) {
+    const remaining = 3 - rows.length;
+    return {
+      ready: false,
+      tone: "sync-warn",
+      message: `Need ${remaining} more loaded recording${remaining === 1 ? "" : "s"}; check Load / reload beside saved recordings.`,
+    };
+  }
+  const sampledJoints = sampledCalibrationJoints(rows);
+  if (!sampledJoints.length) {
+    return {
+      ready: false,
+      tone: "sync-error",
+      message: "Cannot complete: the recorded orientations contain no usable joint-sensor samples.",
+    };
+  }
+  const unsensedJoints = CALIBRATION_JOINTS.filter((joint) => !sampledJoints.includes(joint));
+  return {
+    ready: true,
+    tone: unsensedJoints.length ? "sync-warn" : "sync-ok",
+    message: unsensedJoints.length
+      ? `Ready. Sensor data: ${sampledJoints.join(", ")}. Fixed at final pose: ${unsensedJoints.join(", ")}.`
+      : `Ready to complete calibration for ${sampledJoints.join(", ")}.`,
+  };
 }
 
 function renderCalibrationStatus(payload) {
@@ -442,16 +587,18 @@ function renderCalibrationStatus(payload) {
   const latest = payload?.latest || {};
   const latestValues = CALIBRATION_JOINTS.map((joint) => {
     const reading = latest[joint];
-    const port = reading?.port_label || "no port";
+    const sensor = reading?.port_label || "no sensor";
     const hz = Number(reading?.sample_hz);
     const rate = Number.isFinite(hz) ? `, ${hz.toFixed(0)} Hz` : "";
-    return `${joint}: ${formatCalibrationNumber(reading?.angle)} (${port}${rate})`;
+    return `${joint}: ${formatCalibrationNumber(reading?.angle)} (${sensor}${rate})`;
   });
   const averageValues = CALIBRATION_JOINTS.map((joint) => {
     const average = averages[joint];
     const count = average?.count || 0;
-    const port = average?.port_label || "no port";
-    return `${joint}: ${formatCalibrationNumber(average?.angle)} (${count}/10, ${port})`;
+    const sensorCount = average?.sensor_count || 0;
+    const sensor = average?.port_label || "no sensor";
+    const method = average?.average_method === "arithmetic" ? ", standard avg" : "";
+    return `${joint}: ${formatCalibrationNumber(average?.angle)} (${count} samples from ${sensorCount} sensor${sensorCount === 1 ? "" : "s"}, ${sensor}${method})`;
   });
   const targetValues = payload?.targets_deg
     ? CALIBRATION_JOINTS.map((joint) => `${joint}=${payload.targets_deg[joint]}`).join(", ")
@@ -470,7 +617,7 @@ function renderCalibrationStatus(payload) {
     nanoValues.push(`clamp: ${formatCalibrationNumber(latest.clamp.angle)} raw=${latest.clamp.raw_angle ?? "n/a"}`);
   }
   const nanoText = nanoValues.length ? ` | Nano: ${nanoValues.join(" | ")}` : "";
-  calibrationStatus.textContent = `Source: ${sourceLabel} | ${udpLabel} | Live: ${latestValues.join(" | ")}${nanoText} | Last-10 averages: ${averageValues.join(" | ")} | Calibration joint row: ${targetValues}`;
+  calibrationStatus.textContent = `Source: ${sourceLabel} | ${udpLabel} | Best 5-reading estimates: ${latestValues.join(" | ")}${nanoText} | Sensor windows: ${averageValues.join(" | ")} | Calibration joint row: ${targetValues}`;
   renderLiveInputFeeds(payload);
 }
 
@@ -479,19 +626,310 @@ function liveFeedAge(reading) {
   return Number.isFinite(age) && age >= 0 ? `${Math.round(age)} ms ago` : "waiting";
 }
 
-function liveFeedRow(label, detail, reading) {
+function liveFeedTiming(reading) {
+  const averageMs = Number(reading?.average_interval_ms);
+  const sampleCount = Number(reading?.timing_sample_count || 0);
+  if (!Number.isFinite(averageMs) || sampleCount < 2) {
+    return `interval avg collecting (${sampleCount}/10)`;
+  }
+  const digits = averageMs < 10 ? 2 : averageMs < 100 ? 1 : 0;
+  return `interval avg ${averageMs.toFixed(digits)} ms (${sampleCount}/10)`;
+}
+
+function recordBaseCameraDisplayAngle(reading) {
+  if (Number(reading?.camera) !== 0) return;
+  const angle = Number(reading?.angle);
+  if (!Number.isFinite(angle)) return;
+  const frame = reading?.frame ?? reading?.received_at_ms;
+  if (frame == null || frame === baseCameraDisplayHistory.lastFrame) return;
+  if (
+    Number.isFinite(Number(frame))
+    && Number.isFinite(Number(baseCameraDisplayHistory.lastFrame))
+    && Number(frame) < Number(baseCameraDisplayHistory.lastFrame)
+  ) {
+    baseCameraDisplayHistory.samples = [];
+  }
+  baseCameraDisplayHistory.lastFrame = frame;
+  baseCameraDisplayHistory.samples.push(angle);
+  if (baseCameraDisplayHistory.samples.length > 10) {
+    baseCameraDisplayHistory.samples.splice(0, baseCameraDisplayHistory.samples.length - 10);
+  }
+}
+
+function baseCameraStandardAverage(windowSize) {
+  const samples = baseCameraDisplayHistory.samples.slice(-windowSize);
+  if (!samples.length) return { angle: null, count: 0 };
+  return {
+    angle: samples.reduce((sum, angle) => sum + angle, 0) / samples.length,
+    count: samples.length,
+  };
+}
+
+function liveFeedAngleAverage(reading, windowSize) {
+  const legacyAverage = windowSize === 10 ? reading?.average_angle_deg : undefined;
+  const legacyCount = windowSize === 10 ? reading?.angle_sample_count : undefined;
+  const baseStats = Number(reading?.camera) === 0
+    ? baseCameraStandardAverage(windowSize)
+    : null;
+  const averageAngle = Number(
+    baseStats?.angle ?? reading?.[`average_angle_${windowSize}_deg`] ?? legacyAverage
+  );
+  const sampleCount = Number(
+    baseStats?.count ?? reading?.[`angle_sample_count_${windowSize}`] ?? legacyCount ?? 0
+  );
+  const averageLabel = Number(reading?.camera) === 0 || reading?.average_method === "arithmetic"
+    ? "standard avg"
+    : "angle avg";
+  if (!Number.isFinite(averageAngle) || sampleCount === 0) {
+    return `${windowSize}-sample ${averageLabel} collecting (${sampleCount}/${windowSize})`;
+  }
+  return `${windowSize}-sample ${averageLabel} ${formatCalibrationNumber(averageAngle)}° (${sampleCount}/${windowSize})`;
+}
+
+function liveFeedRow(label, detail, reading, angleWindows = [10]) {
   const fresh = Number(reading?.received_at_ms) > 0 && Date.now() - Number(reading.received_at_ms) < 2000;
-  return `<div class="live-feed-row ${fresh ? "live-feed-ok" : "live-feed-missing"}"><strong>${label}</strong><span>${detail}</span><small>${fresh ? liveFeedAge(reading) : "no usable data"}</small></div>`;
+  const angleAverages = angleWindows.map((windowSize) => liveFeedAngleAverage(reading, windowSize));
+  const status = fresh
+    ? `${angleAverages.join(" · ")} · ${liveFeedTiming(reading)} · ${liveFeedAge(reading)}`
+    : "no usable data";
+  return `<div class="live-feed-row ${fresh ? "live-feed-ok" : "live-feed-missing"}"><strong>${label}</strong><span>${detail}</span><small>${status}</small></div>`;
+}
+
+function cameraFeedIndices(payload) {
+  const cameraFeeds = payload?.camera_feeds || {};
+  const liveIndices = Object.keys(cameraFeeds)
+    .map((key) => Number.parseInt(key, 10))
+    .filter(Number.isFinite);
+  return [...new Set([...DEFAULT_CAMERA_FEEDS, ...liveIndices])].sort((a, b) => a - b);
+}
+
+function createAccelerometerLabel() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+  }));
+  sprite.scale.set(0.48, 0.06, 1);
+  sprite.position.set(0, 0, 0.13);
+  sprite.renderOrder = 20;
+  return { canvas, context, texture, sprite, text: "" };
+}
+
+function drawAccelerometerLabel(label, text) {
+  if (!label.context || label.text === text) return;
+  label.text = text;
+  const { canvas, context } = label;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "rgba(7, 17, 31, 0.9)";
+  context.fillRect(0, 10, canvas.width, canvas.height - 20);
+  context.strokeStyle = "rgba(124, 209, 255, 0.85)";
+  context.lineWidth = 4;
+  context.strokeRect(2, 12, canvas.width - 4, canvas.height - 24);
+  context.fillStyle = "#e7edf3";
+  context.font = "600 38px IBM Plex Sans, Segoe UI, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, canvas.width / 2, canvas.height / 2, canvas.width - 34);
+  label.texture.needsUpdate = true;
+}
+
+function createAccelerometerArrow(direction, length, color, headLength, headWidth) {
+  const arrow = new THREE.ArrowHelper(
+    direction,
+    new THREE.Vector3(),
+    length,
+    color,
+    headLength,
+    headWidth
+  );
+  // WebGL line width is fixed to one pixel on most platforms. A cylinder gives
+  // the vector shaft real 3D thickness that can be scaled with the control.
+  arrow.line.visible = false;
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(1, 1, 1, 12),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  shaft.name = "vector-shaft";
+  arrow.add(shaft);
+  arrow.userData.shaft = shaft;
+  return arrow;
+}
+
+function setAccelerometerArrowDimensions(arrow, length, headLength, headWidth) {
+  const scaledLength = length * accelerometerVectorScale;
+  const scaledHeadLength = Math.min(headLength * accelerometerVectorScale, scaledLength * 0.9);
+  const scaledHeadWidth = headWidth * accelerometerVectorScale;
+  arrow.setLength(scaledLength, scaledHeadLength, scaledHeadWidth);
+
+  const shaftLength = Math.max(0.001, scaledLength - scaledHeadLength);
+  const shaftRadius = Math.max(0.0008, scaledHeadWidth * 0.22);
+  arrow.userData.shaft.position.set(0, shaftLength / 2, 0);
+  arrow.userData.shaft.scale.set(shaftRadius, shaftLength, shaftRadius);
+}
+
+function createAccelerometerVisual(feedKey, config) {
+  if (!armSceneGroup || useCanvasFallback) return null;
+  const jointState = linkStates[config.jointIndex];
+  if (!jointState) return null;
+  const group = new THREE.Group();
+  group.name = `accelerometer-vector-${feedKey}`;
+  group.position.set(...config.position);
+  group.rotation.set(...config.rotation);
+
+  const axes = new THREE.AxesHelper(0.085);
+  axes.material.depthTest = false;
+  axes.material.transparent = true;
+  axes.material.opacity = 0.5;
+  axes.renderOrder = 9;
+  group.add(axes);
+
+  const componentArrows = {
+    x: createAccelerometerArrow(new THREE.Vector3(1, 0, 0), 0.06, ACCELEROMETER_VECTOR_COLORS.x, 0.016, 0.008),
+    y: createAccelerometerArrow(new THREE.Vector3(0, 1, 0), 0.06, ACCELEROMETER_VECTOR_COLORS.y, 0.016, 0.008),
+    z: createAccelerometerArrow(new THREE.Vector3(0, 0, 1), 0.06, ACCELEROMETER_VECTOR_COLORS.z, 0.016, 0.008),
+  };
+  Object.values(componentArrows).forEach((arrow) => group.add(arrow));
+
+  const resultantArrow = createAccelerometerArrow(
+    new THREE.Vector3(0, 0, 1),
+    0.1,
+    ACCELEROMETER_VECTOR_COLORS.resultant,
+    0.022,
+    0.011
+  );
+  group.add(resultantArrow);
+
+  const label = createAccelerometerLabel();
+  group.add(label.sprite);
+  group.visible = false;
+  // Parenting to the pivot keeps raw X/Y/Z in the sensor-local frame while
+  // carrying that entire frame with the physical joint as the arm moves.
+  jointState.pivot.add(group);
+
+  const visual = {
+    feedKey,
+    config,
+    group,
+    componentArrows,
+    resultantArrow,
+    label,
+    acceleration: null,
+    receivedAtMs: 0,
+  };
+  accelerometerVisuals.set(feedKey, visual);
+  return visual;
+}
+
+function setComponentArrow(arrow, axis, value) {
+  const magnitude = Math.abs(Number(value));
+  if (!Number.isFinite(magnitude) || magnitude < 0.005) {
+    arrow.visible = false;
+    return;
+  }
+  arrow.visible = true;
+  const direction = axis.clone().multiplyScalar(Number(value) < 0 ? -1 : 1);
+  const length = 0.018 + Math.min(2, magnitude) * 0.045;
+  arrow.setDirection(direction);
+  setAccelerometerArrowDimensions(
+    arrow,
+    length,
+    Math.min(0.016, length * 0.32),
+    Math.min(0.008, length * 0.16)
+  );
+}
+
+function applyAccelerometerVectorDimensions(visual) {
+  if (!visual.acceleration) return;
+  const { x, y, z } = visual.acceleration;
+  setComponentArrow(visual.componentArrows.x, new THREE.Vector3(1, 0, 0), x);
+  setComponentArrow(visual.componentArrows.y, new THREE.Vector3(0, 1, 0), y);
+  setComponentArrow(visual.componentArrows.z, new THREE.Vector3(0, 0, 1), z);
+
+  const resultant = new THREE.Vector3(x, y, z);
+  const magnitude = resultant.length();
+  visual.resultantArrow.visible = magnitude >= 0.005;
+  if (visual.resultantArrow.visible) {
+    visual.resultantArrow.setDirection(resultant.normalize());
+    const length = 0.025 + Math.min(2, magnitude) * 0.065;
+    setAccelerometerArrowDimensions(
+      visual.resultantArrow,
+      length,
+      Math.min(0.022, length * 0.3),
+      Math.min(0.011, length * 0.15)
+    );
+  }
+}
+
+function updateAccelerometerVisuals(feeds) {
+  Object.entries(ACCELEROMETER_3D_CONFIG).forEach(([feedKey, config]) => {
+    const reading = feeds?.[feedKey];
+    const accel = reading?.accel;
+    const values = [Number(accel?.x), Number(accel?.y), Number(accel?.z)];
+    if (!values.every(Number.isFinite)) return;
+
+    const [x, y, z] = values;
+    const receivedAtMs = Number(reading.received_at_ms || Date.now());
+    accelerometerReadings.set(feedKey, {
+      acceleration: { x, y, z },
+      receivedAtMs,
+    });
+
+    const visual = accelerometerVisuals.get(feedKey)
+      || createAccelerometerVisual(feedKey, config);
+    if (!visual) return;
+
+    visual.acceleration = { x, y, z };
+    applyAccelerometerVectorDimensions(visual);
+
+    visual.receivedAtMs = receivedAtMs;
+    drawAccelerometerLabel(
+      visual.label,
+      `${config.joint.toUpperCase()} ${feedKey}  X ${x.toFixed(2)}  Y ${y.toFixed(2)}  Z ${z.toFixed(2)} g`
+    );
+  });
+}
+
+function updateAccelerometerVisualPositions() {
+  accelerometerVisuals.forEach((visual) => {
+    const state = linkStates[visual.config.jointIndex];
+    const fresh = Date.now() - visual.receivedAtMs < 2000;
+    visual.group.visible = accelerometerVisualsVisible && fresh && currentSceneId === "arm";
+    if (!state || visual.group.parent === state.pivot) return;
+    state.pivot.add(visual.group);
+    visual.group.position.set(...visual.config.position);
+    visual.group.rotation.set(...visual.config.rotation);
+  });
+}
+
+function setAccelerometerVisualsVisible(visible) {
+  accelerometerVisualsVisible = Boolean(visible);
+  if (toggleAccelerometerVectorsButton) {
+    toggleAccelerometerVectorsButton.textContent = accelerometerVisualsVisible
+      ? "Hide MPU XYZ"
+      : "Show MPU XYZ";
+  }
+  if (accelerometer3dLegend) accelerometer3dLegend.hidden = !accelerometerVisualsVisible;
+  updateAccelerometerVisualPositions();
 }
 
 function renderLiveInputFeeds(payload) {
+  const cameraIndices = cameraFeedIndices(payload);
+
   if (liveCameraFeeds) {
     const feeds = payload?.camera_feeds || {};
-    liveCameraFeeds.innerHTML = [0, 2, 4, 7].map((camera) => {
+    liveCameraFeeds.innerHTML = cameraIndices.map((camera) => {
       const reading = feeds[String(camera)];
+      recordBaseCameraDisplayAngle(reading);
       const angle = formatCalibrationNumber(reading?.angle);
       const details = reading
-        ? `${angle}° · ${reading.port_label || "unmapped"} · pairs ${reading.pairs ?? 0}/${reading.expected_pairs ?? "?"} · markers ${reading.markers ?? 0}`
+        ? `${angle}° · base joint · angle codes ${reading.codes ?? reading.pairs ?? 0} · ring positions ${reading.ring_positions ?? reading.expected_pairs ?? "?"} · markers ${reading.markers ?? 0}`
         : "waiting for this camera";
       return liveFeedRow(`Camera ${camera}`, details, reading);
     }).join("");
@@ -502,16 +940,29 @@ function renderLiveInputFeeds(payload) {
     const nanos = payload?.nanos || accelerometers.nanos || {};
     const expectedFeeds = ["dual:0x68", "dual:0x69", "single:0x68"];
     const keys = [...new Set([...expectedFeeds, ...Object.keys(feeds)])];
+    updateAccelerometerVisuals(feeds);
     liveAccelerometerFeeds.innerHTML = keys.map((key) => {
       const reading = feeds[key];
       const accel = reading?.accel;
       const board = key.split(":")[0];
       const raw = accel
-        ? `raw [${accel.x}, ${accel.y}, ${accel.z}]`
+        ? `raw [${formatVectorComponent(accel.x)}, ${formatVectorComponent(accel.y)}, ${formatVectorComponent(accel.z)}]`
         : nanos[board]?.last_line
           ? "serial connected, but no valid raw MPU packet"
           : "waiting for this accelerometer";
-      return liveFeedRow(key, `${formatCalibrationNumber(reading?.angle)}° · ${raw}`, reading);
+      const polynomialCount = Number(reading?.polynomial_sample_count || 0);
+      const polynomialWindow = Number(reading?.polynomial_window_size || 10);
+      const polynomialDegree = Number(reading?.polynomial_degree ?? 1);
+      const polynomialState = reading?.polynomial_angle_deg != null
+        && Number.isFinite(Number(reading.polynomial_angle_deg))
+        ? `LS degree ${polynomialDegree}, ${polynomialCount}/${polynomialWindow}`
+        : `LS collecting ${polynomialCount}/${polynomialWindow}`;
+      return liveFeedRow(
+        key,
+        `${formatCalibrationNumber(reading?.angle)}° estimate · raw angle ${formatCalibrationNumber(reading?.raw_angle)}° · ${polynomialState} · ${raw}`,
+        reading,
+        [10, 100]
+      );
     }).join("");
   }
 }
@@ -729,6 +1180,8 @@ function applyLiveUdpArmPose(payload) {
   }
 
   setJointValues(positions);
+  udpCalibrationSyncPinned = true;
+  setSyncStatus("sync-ok", "Sensor control locked — arm following calibrated live sensors.");
 }
 
 async function fetchCalibrationStatus() {
@@ -748,26 +1201,30 @@ async function fetchCalibrationStatus() {
   }
 }
 
-async function clearCalibrationForBrowserReload() {
+async function loadCalibrationForBrowser() {
   cancelAutomaticCalibrationCapture();
   calibrationSnapshots.clear();
-  calibrationRowsCache = [];
   calibratedReferenceId = null;
   calibratedUdpReferenceAngles = null;
   calibratedSensorModels = null;
   lastAppliedUdpAngles = null;
   udpCalibrationSyncPinned = false;
   preCalibrationActive = true;
-  if (finishCalibrationButton) finishCalibrationButton.disabled = false;
+  sensorBlend = null;
+  setSensorControlLocked(false);
 
-  const payload = await apiRequest("/api/calibration/clear", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source_mode: calibrationSourceSelect?.value || "both" }),
-  });
+  const sourceMode = calibrationSourceSelect?.value || "both";
+  const payload = await apiRequest(`/api/calibration/status?source=${encodeURIComponent(sourceMode)}`);
   renderCalibrationStatus(payload);
   renderCalibrationRows(payload.rows || []);
-  setSyncStatus("sync-warn", "Calibration records cleared for this browser session.");
+  const rowCount = payload.rows?.length || 0;
+  const loadedCount = calibrationRowsCache.length;
+  setSyncStatus(
+    "sync-warn",
+    rowCount
+      ? `${rowCount} saved calibration orientation${rowCount === 1 ? "" : "s"} available; ${loadedCount} checked and loaded.`
+      : "No calibration orientations recorded yet."
+  );
 }
 
 function connectCalibrationStream() {
@@ -820,8 +1277,8 @@ async function captureCalibrationRow({
     setSyncStatus(
       "sync-warn",
       automatic
-        ? `Automatically recorded calibration pose ${rowNumber}.`
-        : `Recorded calibration pose ${rowNumber}; choose the next orientation.`
+        ? `Automatically saved calibration pose ${rowNumber}; check Load / reload to use it.`
+        : `Saved calibration pose ${rowNumber}; check Load / reload to use it.`
     );
   } catch (error) {
     if (calibrationStatus) {
@@ -829,7 +1286,7 @@ async function captureCalibrationRow({
     }
   } finally {
     if (calibrateCurrentButton) {
-      calibrateCurrentButton.disabled = false;
+      calibrateCurrentButton.disabled = sensorControlLocked;
     }
   }
 }
@@ -877,6 +1334,7 @@ function queueAutomaticCalibrationCapture(positions, durationSec, label) {
 }
 
 function moveToCalibrationOrientation() {
+  if (blockManualMotionWhileSensorLocked()) return;
   const positions = getJointValues().map((value) => normalizeAngle(value));
   updateArmKinematics(positions);
   updateCollisionState();
@@ -890,32 +1348,54 @@ function moveToCalibrationOrientation() {
 }
 
 function finishCalibrationSession() {
-  const rows = calibrationRowsCache;
-  if (rows.length < 3) {
-    setSyncStatus("sync-error", "Need at least three recorded orientations before finishing calibration.");
-    return;
+  setCalibrationCompletionMessage("sync-warn", "Checking calibration recordings…");
+  try {
+    const rows = calibrationRowsCache;
+    const readiness = calibrationCompletionReadiness(rows);
+    if (!readiness.ready) {
+      setSyncStatus("sync-error", readiness.message);
+      setCalibrationCompletionMessage("sync-error", readiness.message);
+      return;
+    }
+    const sampledJoints = sampledCalibrationJoints(rows);
+    const unsensedJoints = CALIBRATION_JOINTS.filter((joint) => !sampledJoints.includes(joint));
+    const lastRow = rows[rows.length - 1];
+    localJointPositions = [...getDisplayedPositions()];
+    cancelAutomaticCalibrationCapture();
+    preCalibrationActive = false;
+    calibratedSensorModels = fitCalibrationModels(
+      rows,
+      calibrationSourceSelect?.value || "both"
+    );
+    adoptCalibrationReference(lastRow, true);
+    const fittedJoints = Object.keys(calibratedSensorModels);
+    const referenceOnlyJoints = sampledJoints.filter((joint) => !fittedJoints.includes(joint));
+    const modelSummary = fittedJoints.length
+      ? ` Fitted sensor-to-model mapping: ${fittedJoints.join(", ")}.`
+      : " Using the final pose as the sensor reference.";
+    const unsensedSummary = unsensedJoints.length
+      ? ` No sensor samples for ${unsensedJoints.join(", ")}; ${unsensedJoints.length === 1 ? "it remains" : "they remain"} fixed at the final pose.`
+      : "";
+    const referenceOnlySummary = referenceOnlyJoints.length
+      ? ` ${referenceOnlyJoints.join(", ")} did not vary enough for a fitted mapping and will use final-pose reference tracking.`
+      : "";
+    calibrationCompletionSummary = `Calibration complete: ${rows.length} orientations, sensor control locked.${unsensedSummary}${referenceOnlySummary}`;
+    setSensorControlLocked(true);
+    setSyncStatus(
+      "sync-ok",
+      `Calibration finished with ${rows.length} recorded orientations.${modelSummary}${unsensedSummary}${referenceOnlySummary} Sensor control is now locked.`
+    );
+    setCalibrationCompletionMessage("sync-ok", calibrationCompletionSummary);
+    renderCalibrationCoverage(rows);
+    void fetchCalibrationStatus();
+  } catch (error) {
+    console.error("Complete calibration failed", error);
+    const message = `Complete Calibration failed: ${error?.message || String(error)}`;
+    preCalibrationActive = true;
+    setSensorControlLocked(false);
+    setSyncStatus("sync-error", message);
+    setCalibrationCompletionMessage("sync-error", message);
   }
-  const missing = CALIBRATION_JOINTS.filter((joint) => (
-    rows.every((row) => Number(row.sample_counts?.[joint] || 0) === 0)
-  ));
-  if (missing.length) {
-    setSyncStatus("sync-error", `Cannot finish: no samples for ${missing.join(", ")}.`);
-    return;
-  }
-  const lastRow = rows[rows.length - 1];
-  cancelAutomaticCalibrationCapture();
-  preCalibrationActive = false;
-  calibratedSensorModels = fitCalibrationModels(
-    rows,
-    calibrationSourceSelect?.value || "both"
-  );
-  adoptCalibrationReference(lastRow, true);
-  const fittedJoints = Object.keys(calibratedSensorModels);
-  const modelSummary = fittedJoints.length
-    ? ` Fitted sensor-to-model mapping: ${fittedJoints.join(", ")}.`
-    : " Using the final pose as the sensor reference.";
-  setSyncStatus("sync-ok", `Calibration finished with ${rows.length} recorded orientations.${modelSummary}`);
-  if (finishCalibrationButton) finishCalibrationButton.disabled = true;
 }
 
 async function uncalibrateCurrentPose() {
@@ -937,7 +1417,8 @@ async function uncalibrateCurrentPose() {
     calibratedSensorModels = null;
     lastAppliedUdpAngles = null;
     udpCalibrationSyncPinned = false;
-    if (finishCalibrationButton) finishCalibrationButton.disabled = false;
+    sensorBlend = null;
+    setSensorControlLocked(false);
     renderCalibrationStatus(payload);
     renderCalibrationRows(payload.rows || []);
     setSyncStatus("sync-warn", "Uncalibrated — position arm and calibrate again");
@@ -947,7 +1428,7 @@ async function uncalibrateCurrentPose() {
     }
   } finally {
     if (uncalibrateCurrentButton) {
-      uncalibrateCurrentButton.disabled = false;
+      uncalibrateCurrentButton.disabled = !sensorControlLocked;
     }
   }
 }
@@ -1169,8 +1650,8 @@ function renderJointInputs(names) {
     wrapper.innerHTML = `
       <div class="joint-row">
         <span>${jointName}</span>
-        <input data-role="slider" data-index="${index}" type="range" min="-180" max="180" step="1" value="0">
-        <input data-role="number" data-index="${index}" type="number" min="-180" max="180" step="1" value="0">
+        <input data-role="slider" data-index="${index}" type="range" min="-180" max="180" step="1" value="0" ${sensorControlLocked ? "disabled" : ""}>
+        <input data-role="number" data-index="${index}" type="number" min="-180" max="180" step="1" value="0" ${sensorControlLocked ? "disabled" : ""}>
       </div>
     `;
     jointForm.appendChild(wrapper);
@@ -1217,6 +1698,9 @@ function getDisplayedPositions() {
     }
     return localJointPositions;
   }
+  if (sensorControlLocked) {
+    return localJointPositions;
+  }
   if (backendConnected && Array.isArray(lastStatus?.joint_state?.positions)) {
     const now = performance.now();
     if (backendBlend) {
@@ -1247,13 +1731,75 @@ function setSyncStatus(tone, message) {
   syncStatus.textContent = message;
 }
 
+function setCalibrationCompletionMessage(tone, message) {
+  if (!calibrationCompletionMessage) return;
+  calibrationCompletionMessage.className = `sync-status ${tone}`;
+  calibrationCompletionMessage.textContent = message;
+}
+
+function setSensorControlLocked(locked) {
+  sensorControlLocked = Boolean(locked);
+  if (!sensorControlLocked) calibrationCompletionSummary = "";
+  const manualMotionControls = [
+    presetDuration,
+    customDuration,
+    directDuration,
+    directCommandInput,
+    sendCustomButton,
+    sendDirectButton,
+    copyCurrentButton,
+    syncRobotButton,
+  ];
+  manualMotionControls.forEach((element) => {
+    if (element) element.disabled = sensorControlLocked;
+  });
+  jointForm.querySelectorAll("input, button, select").forEach((element) => {
+    element.disabled = sensorControlLocked;
+  });
+  poseButtons.querySelectorAll("button").forEach((button) => {
+    button.disabled = sensorControlLocked;
+  });
+  sequenceButtons.querySelectorAll("button").forEach((button) => {
+    button.disabled = sensorControlLocked;
+  });
+  Object.values(calibrationTargetInputs).forEach((input) => {
+    if (input) input.disabled = sensorControlLocked;
+  });
+  if (calibrationSourceSelect) calibrationSourceSelect.disabled = sensorControlLocked;
+  if (calibrateCurrentButton) calibrateCurrentButton.disabled = sensorControlLocked;
+  if (moveCalibrationPoseButton) moveCalibrationPoseButton.disabled = sensorControlLocked;
+  if (clearLoadedCalibrationButton) clearLoadedCalibrationButton.disabled = sensorControlLocked;
+  calibrationRows?.querySelectorAll(".calibration-load-toggle").forEach((checkbox) => {
+    checkbox.disabled = sensorControlLocked;
+  });
+  if (finishCalibrationButton) {
+    finishCalibrationButton.disabled = sensorControlLocked;
+    finishCalibrationButton.textContent = sensorControlLocked
+      ? "Sensor Control Locked"
+      : "Complete Calibration";
+  }
+  if (uncalibrateCurrentButton) uncalibrateCurrentButton.disabled = !sensorControlLocked;
+  if (sensorControlLocked) {
+    activeMotion = null;
+    backendBlend = null;
+  }
+}
+
+function blockManualMotionWhileSensorLocked() {
+  if (!sensorControlLocked) return false;
+  setSyncStatus("sync-ok", "Sensor control is locked; unlock and recalibrate to use manual arm controls.");
+  return true;
+}
+
 function renderPoseButtons(poses) {
   poseButtons.innerHTML = "";
   Object.keys(poses).forEach((poseName) => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = poseName;
+    button.disabled = sensorControlLocked;
     button.addEventListener("click", async () => {
+      if (blockManualMotionWhileSensorLocked()) return;
       const duration = Number(presetDuration.value || 1);
       setMotionTarget(poses[poseName], duration);
       updateArmKinematics(poses[poseName]);
@@ -1314,9 +1860,12 @@ function renderSequenceButtons() {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = label;
+    button.disabled = sensorControlLocked;
     button.addEventListener("click", async () => {
+      if (blockManualMotionWhileSensorLocked()) return;
       const duration = Number(directDuration.value || 1);
       for (const positions of sequence) {
+        if (blockManualMotionWhileSensorLocked()) return;
         setJointValues(positions);
         setMotionTarget(positions, duration);
         updateArmKinematics(positions);
@@ -1384,6 +1933,7 @@ function updateStatus(lastCommand) {
     `Backend endpoint: ${API_BASE_URL || "same-origin /api"}`,
     `Last backend call: ${lastCallLabel}`,
     `Backend state mode: ${backendStateMode}`,
+    `Arm control source: ${sensorControlLocked ? "calibrated sensors (locked)" : "manual/backend"}`,
     `Rapier collision state: ${collisionState.active ? collisionState.messages.join(" | ") : "clear"}`,
     `Joint positions: ${formatPositions(positions)}`,
     `Last command type: ${lastCommand.type}`,
@@ -1484,6 +2034,10 @@ async function fetchStatus() {
 }
 
 function setMotionTarget(positions, durationSec) {
+  if (sensorControlLocked) {
+    activeMotion = null;
+    return false;
+  }
   targetJointPositions = positions.map((value) => normalizeAngle(value));
   activeMotion = {
     start: localJointPositions.map((value) => normalizeAngle(value)),
@@ -1491,9 +2045,14 @@ function setMotionTarget(positions, durationSec) {
     startedAt: performance.now(),
     duration: Math.max(0.2, Number(durationSec)) * 1000,
   };
+  return true;
 }
 
 function onLiveJointInput(event) {
+  if (blockManualMotionWhileSensorLocked()) {
+    setJointValues(getDisplayedPositions());
+    return;
+  }
   const index = Number(event.target.dataset.index);
   const role = event.target.dataset.role;
   const value = Number(event.target.value);
@@ -1519,6 +2078,10 @@ function onLiveJointInput(event) {
 }
 
 function advanceOfflineMotion(now) {
+  if (sensorControlLocked) {
+    activeMotion = null;
+    return;
+  }
   if (backendConnected && Array.isArray(lastStatus?.joint_state?.positions)) {
     localJointPositions = [...lastStatus.joint_state.positions];
     return;
@@ -1596,6 +2159,7 @@ function updateArmKinematics(positions) {
       w: quaternion.w,
     });
   });
+  updateAccelerometerVisualPositions();
 }
 
 function updateCollisionState() {
@@ -1969,6 +2533,27 @@ function drawFallbackArm() {
     return { a, b };
   };
 
+  const drawVectorArrow = (origin3d, end3d, color, thickness) => {
+    const projected = drawLine3d(origin3d, end3d, color, thickness);
+    if (!projected) return;
+    const { a, b } = projected;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const screenLength = Math.hypot(dx, dy);
+    if (screenLength < 1) return;
+    const ux = dx / screenLength;
+    const uy = dy / screenLength;
+    const headLength = Math.min(screenLength * 0.45, 7 + thickness * 2.5);
+    const headWidth = 3 + thickness * 1.7;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x - ux * headLength - uy * headWidth, b.y - uy * headLength + ux * headWidth);
+    ctx.lineTo(b.x - ux * headLength + uy * headWidth, b.y - uy * headLength - ux * headWidth);
+    ctx.closePath();
+    ctx.fill();
+  };
+
   for (let i = -6; i <= 6; i += 1) {
     drawLine3d(
       new THREE.Vector3(-0.9, i * 0.15, 0),
@@ -1995,12 +2580,14 @@ function drawFallbackArm() {
   }
 
   let transform = new THREE.Matrix4().identity();
+  const jointTransforms = [];
   const positions = getDisplayedPositions();
   const segments = ARM_CONFIG.chain
     .map((joint, index) => {
       transform = transform.multiply(
         new THREE.Matrix4().makeTranslation(joint.offset[0], joint.offset[1], joint.offset[2])
       );
+      jointTransforms[index] = transform.clone();
       transform = transform.multiply(
         joint.axis === "x"
           ? new THREE.Matrix4().makeRotationX(positions[index] || 0)
@@ -2046,6 +2633,42 @@ function drawFallbackArm() {
     );
     ctx.fill();
   });
+
+  if (accelerometerVisualsVisible) {
+    Object.entries(ACCELEROMETER_3D_CONFIG).forEach(([feedKey, config]) => {
+      const reading = accelerometerReadings.get(feedKey);
+      const jointTransform = jointTransforms[config.jointIndex];
+      if (!reading || !jointTransform || Date.now() - reading.receivedAtMs >= 2000) return;
+
+      const sensorTransform = jointTransform
+        .clone()
+        .multiply(new THREE.Matrix4().makeTranslation(...config.position))
+        .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...config.rotation)));
+      const origin = new THREE.Vector3().applyMatrix4(sensorTransform);
+      const { x, y, z } = reading.acceleration;
+      const components = [
+        { value: x, axis: new THREE.Vector3(1, 0, 0), color: "#ff4d4d" },
+        { value: y, axis: new THREE.Vector3(0, 1, 0), color: "#55dd77" },
+        { value: z, axis: new THREE.Vector3(0, 0, 1), color: "#4da3ff" },
+      ];
+      components.forEach(({ value, axis, color }) => {
+        const magnitude = Math.abs(value);
+        if (magnitude < 0.005) return;
+        const length = (0.018 + Math.min(2, magnitude) * 0.045) * accelerometerVectorScale;
+        const localEnd = axis.multiplyScalar(value < 0 ? -length : length);
+        const end = localEnd.applyMatrix4(sensorTransform);
+        drawVectorArrow(origin, end, color, Math.max(1.25, accelerometerVectorScale * 2));
+      });
+
+      const resultant = new THREE.Vector3(x, y, z);
+      const magnitude = resultant.length();
+      if (magnitude >= 0.005) {
+        const length = (0.025 + Math.min(2, magnitude) * 0.065) * accelerometerVectorScale;
+        const end = resultant.normalize().multiplyScalar(length).applyMatrix4(sensorTransform);
+        drawVectorArrow(origin, end, "#ffe45c", Math.max(1.5, accelerometerVectorScale * 2.5));
+      }
+    });
+  }
 }
 
 function drawFallbackGantry() {
@@ -2523,6 +3146,7 @@ function animate(now) {
 }
 
 sendCustomButton.addEventListener("click", async () => {
+  if (blockManualMotionWhileSensorLocked()) return;
   const positions = getJointValues().map((value) => normalizeAngle(value));
   const duration = Number(customDuration.value || 1);
   setMotionTarget(positions, duration);
@@ -2554,6 +3178,7 @@ sendCustomButton.addEventListener("click", async () => {
 });
 
 sendDirectButton.addEventListener("click", async () => {
+  if (blockManualMotionWhileSensorLocked()) return;
   const duration = Number(directDuration.value || 1);
   const commandSets = directCommandInput.value
     .split(";")
@@ -2570,6 +3195,7 @@ sendDirectButton.addEventListener("click", async () => {
   }
 
   for (const commandSet of commandSets) {
+    if (blockManualMotionWhileSensorLocked()) return;
     const values = commandSet
       .split(",")
       .map((part) => part.trim())
@@ -2619,12 +3245,14 @@ sendDirectButton.addEventListener("click", async () => {
 });
 
 copyCurrentButton.addEventListener("click", () => {
+  if (blockManualMotionWhileSensorLocked()) return;
   setJointValues(getDisplayedPositions());
 });
 
 refreshButton.addEventListener("click", fetchStatus);
 
 syncRobotButton.addEventListener("click", () => {
+  if (blockManualMotionWhileSensorLocked()) return;
   if (hasFreshBackendState()) {
     const positions = [...lastStatus.joint_state.positions];
     localJointPositions = [...positions];
@@ -2671,11 +3299,27 @@ resetCameraButton.addEventListener("click", () => {
 
 cycleGantryFocusButton?.addEventListener("click", cycleGantryFocus);
 autoZoomOutButton?.addEventListener("click", autoZoomOut);
+toggleAccelerometerVectorsButton?.addEventListener("click", () => {
+  setAccelerometerVisualsVisible(!accelerometerVisualsVisible);
+});
+accelerometerVectorScaleInput?.addEventListener("input", (event) => {
+  const nextScale = Number(event.target.value);
+  if (!Number.isFinite(nextScale)) return;
+  accelerometerVectorScale = nextScale;
+  if (accelerometerVectorScaleValue) {
+    accelerometerVectorScaleValue.value = `${nextScale.toFixed(1)}×`;
+  }
+  accelerometerVisuals.forEach(applyAccelerometerVectorDimensions);
+});
 calibrateCurrentButton?.addEventListener("click", captureCalibrationRow);
 moveCalibrationPoseButton?.addEventListener("click", moveToCalibrationOrientation);
 finishCalibrationButton?.addEventListener("click", finishCalibrationSession);
 uncalibrateCurrentButton?.addEventListener("click", uncalibrateCurrentPose);
+clearLoadedCalibrationButton?.addEventListener("click", clearLoadedCalibrationRows);
 calibrationSourceSelect?.addEventListener("change", () => {
+  preCalibrationActive = true;
+  sensorBlend = null;
+  setSensorControlLocked(false);
   calibratedReferenceId = null;
   calibratedUdpReferenceAngles = null;
   calibratedSensorModels = null;
@@ -3673,10 +4317,10 @@ async function bootstrap() {
   renderSceneItemSelect();
   renderImportedModelList();
   try {
-    await clearCalibrationForBrowserReload();
+    await loadCalibrationForBrowser();
   } catch (error) {
     if (calibrationStatus) {
-      calibrationStatus.textContent = `Could not clear calibration records: ${error.message}`;
+      calibrationStatus.textContent = `Could not load calibration records: ${error.message}`;
     }
   }
   fetchCalibrationStatus();

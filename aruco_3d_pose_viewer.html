@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArUco 3D Pose Viewer</title>
+  <script>
+    window.arucoScriptStatus = { cv: 'pending', aruco: 'pending' };
+  </script>
+  <script src="/vendor/js-aruco/cv.js" onload="window.arucoScriptStatus.cv='loaded'" onerror="window.arucoScriptStatus.cv='error'"></script>
+  <script src="/vendor/js-aruco/aruco.js" onload="window.arucoScriptStatus.aruco='loaded'" onerror="window.arucoScriptStatus.aruco='error'"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #16181c;
+      color: #f3f7fb;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      min-height: 100vh;
+    }
+
+    aside {
+      padding: 18px;
+      background: #242932;
+      border-right: 1px solid #3a414d;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 22px;
+    }
+
+    .controls,
+    .readout,
+    .pose-table {
+      display: grid;
+      gap: 10px;
+    }
+
+    label {
+      display: grid;
+      gap: 5px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    input,
+    select,
+    button {
+      min-height: 36px;
+      border: 1px solid #4b5563;
+      border-radius: 5px;
+      padding: 7px 9px;
+      font: inherit;
+      color: #f3f7fb;
+      background: #12151b;
+    }
+
+    input[type="range"] {
+      padding: 0;
+    }
+
+    button {
+      background: #2563eb;
+      border-color: #2563eb;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .readout {
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 6px;
+      background: #0d1117;
+      color: #9ed4ff;
+      font: 700 13px "Courier New", monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .flow {
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 6px;
+      background: #12151b;
+      border: 1px solid #3a414d;
+      color: #d4dbe5;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .flow code {
+      color: #9ed4ff;
+      font-family: "Courier New", monospace;
+      font-weight: 700;
+    }
+
+    .pose-table {
+      margin-top: 14px;
+      font: 700 12px "Courier New", monospace;
+      color: #d4dbe5;
+    }
+
+    .pose-row {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 5px;
+      background: #0d1117;
+      border: 1px solid #303844;
+      overflow-wrap: anywhere;
+    }
+
+    .test-marker {
+      margin-top: 14px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .test-marker canvas {
+      width: 180px;
+      height: 180px;
+      background: #ffffff;
+      border: 10px solid #ffffff;
+      border-radius: 0;
+      image-rendering: pixelated;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+      gap: 14px;
+      align-content: start;
+      padding: 18px;
+    }
+
+    .pane {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .pane h2 {
+      margin: 0;
+      font-size: 15px;
+      color: #c9d7e7;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #05070a;
+      border: 1px solid #343b46;
+      border-radius: 8px;
+    }
+
+    video {
+      display: none;
+    }
+
+    .status {
+      margin-top: 12px;
+      color: #d4dbe5;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .home-link {
+      display: inline-block;
+      margin-bottom: 14px;
+      color: #9ed4ff;
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    @media (max-width: 900px) {
+      .app,
+      .stage {
+        grid-template-columns: 1fr;
+      }
+      aside {
+        border-right: 0;
+        border-bottom: 1px solid #3a414d;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside>
+      <a class="home-link" href="./index.html">Home</a>
+      <h1>ArUco 3D Pose Viewer</h1>
+      <div class="controls">
+        <button id="startBtn" type="button">Start Camera</button>
+        <button id="stopBtn" type="button" disabled>Stop</button>
+        <label>
+          Camera
+          <select id="cameraSelect"></select>
+        </label>
+        <label>
+          Dictionary
+          <select id="dictionarySelect">
+            <option value="js-aruco">js-aruco 5x5 / ARUCO_ORIGINAL-style</option>
+          </select>
+        </label>
+        <label>
+          Downscale width: <span id="downscaleVal">640</span>
+          <input id="downscale" type="range" min="320" max="1280" value="640" step="40">
+        </label>
+        <label>
+          Scan rate: <span id="scanRateVal">12</span> fps
+          <input id="scanRate" type="range" min="1" max="30" value="12" step="1">
+        </label>
+        <label>
+          Marker size: <span id="markerSizeVal">1.00</span> units
+          <input id="markerSize" type="range" min="0.2" max="5" value="1" step="0.1">
+        </label>
+        <label>
+          Focal length: <span id="focalVal">1.20</span>x image width
+          <input id="focalScale" type="range" min="0.5" max="2.5" value="1.2" step="0.05">
+        </label>
+        <label>
+          3D zoom: <span id="zoomVal">1.00</span>x
+          <input id="sceneZoom" type="range" min="0.4" max="2.5" value="1" step="0.05">
+        </label>
+      </div>
+
+      <div class="readout">
+        <div>Markers: <span id="markerCount">0</span></div>
+        <div>Candidates: <span id="candidateCount">0</span></div>
+        <div>Rejected: <span id="rejectedCount">0</span></div>
+        <div>Selected: <span id="selectedMarker">n/a</span></div>
+        <div>Camera K: <span id="cameraMatrixOut">n/a</span></div>
+        <div>rvec: <span id="rvecOut">n/a</span></div>
+        <div>tvec: <span id="tvecOut">n/a</span></div>
+        <div>Roll: <span id="rollOut">n/a</span></div>
+        <div>Pitch: <span id="pitchOut">n/a</span></div>
+        <div>Yaw: <span id="yawOut">n/a</span></div>
+        <div>Position: <span id="positionOut">n/a</span></div>
+      </div>
+
+      <div class="flow">
+        <div><code>detectMarkers()</code>: finds square candidates, decodes marker ids, and returns ordered corners.</div>
+        <div><code>solvePnP()</code>: uses marker corner object points and camera intrinsics to estimate <code>rvec</code>/<code>tvec</code>.</div>
+        <div><code>drawFrameAxes()</code>: red X, green Y, blue Z axes are drawn from that pose.</div>
+      </div>
+
+      <div class="test-marker">
+        <label>
+          Test marker id
+          <input id="testMarkerId" type="number" min="0" max="1023" value="23" step="1">
+        </label>
+        <canvas id="testMarker" width="210" height="210"></canvas>
+      </div>
+
+      <div class="pose-table" id="poseTable"></div>
+
+      <div class="status" id="statusText">
+        Start the camera and point it at one or more ArUco markers.
+      </div>
+    </aside>
+
+    <section class="stage">
+      <div class="pane">
+        <h2>Camera Overlay</h2>
+        <video id="video" playsinline></video>
+        <canvas id="overlay" width="640" height="480"></canvas>
+      </div>
+      <div class="pane">
+        <h2>3D Marker Poses</h2>
+        <canvas id="scene3d" width="640" height="480"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const overlayCtx = overlay.getContext('2d', { willReadFrequently: true });
+    const scene3d = document.getElementById('scene3d');
+    const sceneCtx = scene3d.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const downscale = document.getElementById('downscale');
+    const scanRate = document.getElementById('scanRate');
+    const markerSize = document.getElementById('markerSize');
+    const focalScale = document.getElementById('focalScale');
+    const sceneZoom = document.getElementById('sceneZoom');
+    const downscaleVal = document.getElementById('downscaleVal');
+    const scanRateVal = document.getElementById('scanRateVal');
+    const markerSizeVal = document.getElementById('markerSizeVal');
+    const focalVal = document.getElementById('focalVal');
+    const zoomVal = document.getElementById('zoomVal');
+    const markerCount = document.getElementById('markerCount');
+    const candidateCount = document.getElementById('candidateCount');
+    const rejectedCount = document.getElementById('rejectedCount');
+    const selectedMarker = document.getElementById('selectedMarker');
+    const cameraMatrixOut = document.getElementById('cameraMatrixOut');
+    const rvecOut = document.getElementById('rvecOut');
+    const tvecOut = document.getElementById('tvecOut');
+    const rollOut = document.getElementById('rollOut');
+    const pitchOut = document.getElementById('pitchOut');
+    const yawOut = document.getElementById('yawOut');
+    const positionOut = document.getElementById('positionOut');
+    const poseTable = document.getElementById('poseTable');
+    const testMarkerId = document.getElementById('testMarkerId');
+    const testMarker = document.getElementById('testMarker');
+    const statusText = document.getElementById('statusText');
+
+    let stream = null;
+    let timerId = null;
+    let detector = null;
+
+    function updateLabels() {
+      downscaleVal.textContent = downscale.value;
+      scanRateVal.textContent = scanRate.value;
+      markerSizeVal.textContent = Number(markerSize.value).toFixed(2);
+      focalVal.textContent = Number(focalScale.value).toFixed(2);
+      zoomVal.textContent = Number(sceneZoom.value).toFixed(2);
+    }
+
+    function setStatus(message) {
+      statusText.textContent = message;
+    }
+
+    function drawTestMarker() {
+      const ctx = testMarker.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, testMarker.width, testMarker.height);
+      if (!window.AR?.drawMarker) return;
+      const markerCanvas = document.createElement('canvas');
+      const markerId = Math.max(0, Math.min(1023, Number(testMarkerId.value) || 0));
+      AR.drawMarker(markerCanvas, markerId, 180);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(markerCanvas, 15, 15, 180, 180);
+    }
+
+    function formatDeg(rad) {
+      return `${(rad * 180 / Math.PI).toFixed(1)} deg`;
+    }
+
+    function norm(v) {
+      return Math.hypot(...v);
+    }
+
+    function normalize(v) {
+      const length = norm(v) || 1;
+      return v.map((value) => value / length);
+    }
+
+    function cross(a, b) {
+      return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+      ];
+    }
+
+    function dot(a, b) {
+      return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    function matVec3(m, v) {
+      return [
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+      ];
+    }
+
+    function cameraIntrinsics() {
+      const fx = Number(focalScale.value) * overlay.width;
+      const fy = fx;
+      const cx = overlay.width / 2;
+      const cy = overlay.height / 2;
+      return { fx, fy, cx, cy };
+    }
+
+    function objectPoints(size) {
+      const half = size / 2;
+      return [
+        [-half, half, 0],
+        [half, half, 0],
+        [half, -half, 0],
+        [-half, -half, 0],
+      ];
+    }
+
+    function rotationToRvec(r) {
+      const trace = r[0][0] + r[1][1] + r[2][2];
+      const angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
+      if (Math.abs(angle) < 1e-8) return [0, 0, 0];
+      const denom = 2 * Math.sin(angle);
+      return [
+        ((r[2][1] - r[1][2]) / denom) * angle,
+        ((r[0][2] - r[2][0]) / denom) * angle,
+        ((r[1][0] - r[0][1]) / denom) * angle,
+      ];
+    }
+
+    function solveLinearSystem(matrix, vector) {
+      const n = matrix.length;
+      const a = matrix.map((row, index) => [...row, vector[index]]);
+      for (let col = 0; col < n; col++) {
+        let pivot = col;
+        for (let row = col + 1; row < n; row++) {
+          if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+        }
+        if (Math.abs(a[pivot][col]) < 1e-9) return null;
+        if (pivot !== col) [a[col], a[pivot]] = [a[pivot], a[col]];
+        const div = a[col][col];
+        for (let c = col; c <= n; c++) a[col][c] /= div;
+        for (let row = 0; row < n; row++) {
+          if (row === col) continue;
+          const factor = a[row][col];
+          for (let c = col; c <= n; c++) a[row][c] -= factor * a[col][c];
+        }
+      }
+      return a.map((row) => row[n]);
+    }
+
+    function homographyFromSquare(corners, size) {
+      const src = objectPoints(size).map((point) => [point[0], point[1]]);
+      const a = [];
+      const b = [];
+      for (let i = 0; i < 4; i++) {
+        const [x, y] = src[i];
+        const u = corners[i].x;
+        const v = corners[i].y;
+        a.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+        b.push(u);
+        a.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+        b.push(v);
+      }
+      const h = solveLinearSystem(a, b);
+      if (!h) return null;
+      return [
+        [h[0], h[1], h[2]],
+        [h[3], h[4], h[5]],
+        [h[6], h[7], 1],
+      ];
+    }
+
+    function estimatePose(marker) {
+      const size = Number(markerSize.value);
+      const h = homographyFromSquare(marker.corners, size);
+      if (!h) return null;
+
+      const { fx, fy, cx, cy } = cameraIntrinsics();
+      const invK = [
+        [1 / fx, 0, -cx / fx],
+        [0, 1 / fy, -cy / fy],
+        [0, 0, 1],
+      ];
+
+      const h1 = [h[0][0], h[1][0], h[2][0]];
+      const h2 = [h[0][1], h[1][1], h[2][1]];
+      const h3 = [h[0][2], h[1][2], h[2][2]];
+      let r1 = matVec3(invK, h1);
+      let r2 = matVec3(invK, h2);
+      let t = matVec3(invK, h3);
+      const scale = 2 / (norm(r1) + norm(r2));
+      r1 = normalize(r1.map((value) => value * scale));
+      r2 = normalize(r2.map((value) => value * scale));
+      let r3 = normalize(cross(r1, r2));
+      r2 = normalize(cross(r3, r1));
+      t = t.map((value) => value * scale);
+      if (t[2] < 0) {
+        r1 = r1.map((value) => -value);
+        r2 = r2.map((value) => -value);
+        r3 = r3.map((value) => -value);
+        t = t.map((value) => -value);
+      }
+      const rotation = [
+        [r1[0], r2[0], r3[0]],
+        [r1[1], r2[1], r3[1]],
+        [r1[2], r2[2], r3[2]],
+      ];
+      return {
+        id: marker.id,
+        corners: marker.corners,
+        objectPoints: objectPoints(size),
+        rotation,
+        rvec: rotationToRvec(rotation),
+        translation: t,
+        size,
+      };
+    }
+
+    function eulerFromRotation(r) {
+      const pitch = Math.asin(Math.max(-1, Math.min(1, -r[2][0])));
+      const cp = Math.cos(pitch);
+      let roll;
+      let yaw;
+      if (Math.abs(cp) > 1e-6) {
+        roll = Math.atan2(r[2][1], r[2][2]);
+        yaw = Math.atan2(r[1][0], r[0][0]);
+      } else {
+        roll = 0;
+        yaw = Math.atan2(-r[0][1], r[1][1]);
+      }
+      return { roll, pitch, yaw };
+    }
+
+    function posePoint(pose, local) {
+      const world = matVec3(pose.rotation, local);
+      return [
+        world[0] + pose.translation[0],
+        world[1] + pose.translation[1],
+        world[2] + pose.translation[2],
+      ];
+    }
+
+    function imageProject(point) {
+      const { fx, fy, cx, cy } = cameraIntrinsics();
+      const z = Math.max(0.001, point[2]);
+      return { x: cx + (point[0] * fx) / z, y: cy + (point[1] * fy) / z };
+    }
+
+    function drawOverlay(markers, poses) {
+      overlayCtx.lineWidth = 3;
+      overlayCtx.font = 'bold 14px Arial';
+      markers.forEach((marker) => {
+        const corners = marker.corners;
+        overlayCtx.strokeStyle = '#7cf7a6';
+        overlayCtx.fillStyle = '#7cf7a6';
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(corners[0].x, corners[0].y);
+        for (const corner of corners.slice(1)) overlayCtx.lineTo(corner.x, corner.y);
+        overlayCtx.closePath();
+        overlayCtx.stroke();
+        overlayCtx.fillText(`#${marker.id}`, corners[0].x + 5, corners[0].y - 5);
+
+        overlayCtx.fillStyle = '#ff6b6b';
+        overlayCtx.fillRect(corners[0].x - 4, corners[0].y - 4, 8, 8);
+      });
+
+      poses.forEach((pose) => {
+        const origin = imageProject(posePoint(pose, [0, 0, 0]));
+        const xEnd = imageProject(posePoint(pose, [pose.size * 0.8, 0, 0]));
+        const yEnd = imageProject(posePoint(pose, [0, pose.size * 0.8, 0]));
+        const zEnd = imageProject(posePoint(pose, [0, 0, pose.size * 0.8]));
+        drawLine(overlayCtx, origin, xEnd, '#ff5b5b', 4);
+        drawLine(overlayCtx, origin, yEnd, '#4cff8f', 4);
+        drawLine(overlayCtx, origin, zEnd, '#5da8ff', 4);
+        overlayCtx.font = 'bold 12px Arial';
+        overlayCtx.fillStyle = '#ff5b5b';
+        overlayCtx.fillText('X', xEnd.x + 4, xEnd.y + 4);
+        overlayCtx.fillStyle = '#4cff8f';
+        overlayCtx.fillText('Y', yEnd.x + 4, yEnd.y + 4);
+        overlayCtx.fillStyle = '#5da8ff';
+        overlayCtx.fillText('Z', zEnd.x + 4, zEnd.y + 4);
+      });
+    }
+
+    function drawLine(ctx, a, b, color, width = 2) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    function sceneProject(point) {
+      const zoom = Number(sceneZoom.value);
+      const scale = Math.min(scene3d.width, scene3d.height) * 0.18 * zoom;
+      const x = point[0];
+      const y = point[1];
+      const z = point[2];
+      return {
+        x: scene3d.width * 0.5 + (x - z * 0.38) * scale,
+        y: scene3d.height * 0.58 + (y * 0.85 - z * 0.22) * scale,
+        depth: z,
+      };
+    }
+
+    function drawScene(poses) {
+      sceneCtx.clearRect(0, 0, scene3d.width, scene3d.height);
+      sceneCtx.fillStyle = '#05070a';
+      sceneCtx.fillRect(0, 0, scene3d.width, scene3d.height);
+
+      sceneCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+      sceneCtx.lineWidth = 1;
+      for (let i = -4; i <= 4; i++) {
+        drawLine(sceneCtx, sceneProject([i, -3, 6]), sceneProject([i, 3, 6]), 'rgba(255,255,255,0.09)', 1);
+        drawLine(sceneCtx, sceneProject([-4, i, 6]), sceneProject([4, i, 6]), 'rgba(255,255,255,0.09)', 1);
+      }
+
+      const sorted = [...poses].sort((a, b) => b.translation[2] - a.translation[2]);
+      sorted.forEach((pose) => {
+        const s = pose.size / 2;
+        const localCorners = [
+          [-s, s, 0],
+          [s, s, 0],
+          [s, -s, 0],
+          [-s, -s, 0],
+        ];
+        const projected = localCorners.map((corner) => sceneProject(posePoint(pose, corner)));
+        sceneCtx.fillStyle = 'rgba(124, 209, 255, 0.18)';
+        sceneCtx.strokeStyle = '#7cd1ff';
+        sceneCtx.lineWidth = 2;
+        sceneCtx.beginPath();
+        sceneCtx.moveTo(projected[0].x, projected[0].y);
+        for (const point of projected.slice(1)) sceneCtx.lineTo(point.x, point.y);
+        sceneCtx.closePath();
+        sceneCtx.fill();
+        sceneCtx.stroke();
+
+        const origin = sceneProject(posePoint(pose, [0, 0, 0]));
+        const xEnd = sceneProject(posePoint(pose, [pose.size, 0, 0]));
+        const yEnd = sceneProject(posePoint(pose, [0, pose.size, 0]));
+        const zEnd = sceneProject(posePoint(pose, [0, 0, pose.size]));
+        drawLine(sceneCtx, origin, xEnd, '#ff5b5b', 3);
+        drawLine(sceneCtx, origin, yEnd, '#4cff8f', 3);
+        drawLine(sceneCtx, origin, zEnd, '#5da8ff', 3);
+
+        sceneCtx.fillStyle = '#f3f7fb';
+        sceneCtx.font = 'bold 14px Arial';
+        sceneCtx.fillText(`#${pose.id}`, origin.x + 6, origin.y - 6);
+      });
+    }
+
+    function updateReadout(poses) {
+      markerCount.textContent = String(poses.length);
+      const candidates = detector?.candidates?.length || 0;
+      candidateCount.textContent = String(candidates);
+      rejectedCount.textContent = String(Math.max(0, candidates - poses.length));
+      const { fx, fy, cx, cy } = cameraIntrinsics();
+      cameraMatrixOut.textContent = `[${fx.toFixed(0)},0,${cx.toFixed(0)}; 0,${fy.toFixed(0)},${cy.toFixed(0)}; 0,0,1]`;
+      if (!poses.length) {
+        selectedMarker.textContent = 'n/a';
+        rvecOut.textContent = 'n/a';
+        tvecOut.textContent = 'n/a';
+        rollOut.textContent = 'n/a';
+        pitchOut.textContent = 'n/a';
+        yawOut.textContent = 'n/a';
+        positionOut.textContent = 'n/a';
+        poseTable.innerHTML = '';
+        return;
+      }
+      const selected = poses[0];
+      const euler = eulerFromRotation(selected.rotation);
+      selectedMarker.textContent = `#${selected.id}`;
+      rvecOut.textContent = selected.rvec.map((value) => value.toFixed(3)).join(', ');
+      tvecOut.textContent = selected.translation.map((value) => value.toFixed(3)).join(', ');
+      rollOut.textContent = formatDeg(euler.roll);
+      pitchOut.textContent = formatDeg(euler.pitch);
+      yawOut.textContent = formatDeg(euler.yaw);
+      positionOut.textContent = selected.translation.map((value) => value.toFixed(2)).join(', ');
+      poseTable.innerHTML = poses.map((pose) => {
+        const cornerText = pose.corners
+          .map((corner) => `(${corner.x.toFixed(0)},${corner.y.toFixed(0)})`)
+          .join(' ');
+        const rvec = pose.rvec.map((value) => value.toFixed(3)).join(', ');
+        const tvec = pose.translation.map((value) => value.toFixed(3)).join(', ');
+        return `<div class="pose-row"><div>#${pose.id}</div><div>corners ${cornerText}<br>rvec [${rvec}]<br>tvec [${tvec}]</div></div>`;
+      }).join('');
+    }
+
+    async function listCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter((device) => device.kind === 'videoinput');
+        cameraSelect.innerHTML = '';
+        cameras.forEach((camera, index) => {
+          const option = document.createElement('option');
+          option.value = camera.deviceId;
+          option.textContent = camera.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+      } catch (_error) {
+        cameraSelect.innerHTML = '';
+      }
+    }
+
+    async function startCamera() {
+      if (window.arucoScriptStatus.cv !== 'loaded' || window.arucoScriptStatus.aruco !== 'loaded') {
+        setStatus('ArUco detector scripts did not load.');
+        return;
+      }
+      stopCamera();
+      const deviceId = cameraSelect.value;
+      const constraints = {
+        video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' },
+        audio: false,
+      };
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
+      await listCameras();
+      detector = new AR.Detector();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      setStatus('Detecting markers, estimating pose, and drawing marker axes.');
+      scheduleDetection();
+    }
+
+    function stopCamera() {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+        stream = null;
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    function scheduleDetection() {
+      const delay = 1000 / Math.max(1, Number(scanRate.value));
+      timerId = setTimeout(() => {
+        detectFrame();
+        if (stream) scheduleDetection();
+      }, delay);
+    }
+
+    function detectFrame() {
+      if (!video.videoWidth || !video.videoHeight) return;
+      const targetWidth = Number(downscale.value);
+      const scale = targetWidth / video.videoWidth;
+      overlay.width = targetWidth;
+      overlay.height = Math.round(video.videoHeight * scale);
+      scene3d.width = overlay.width;
+      scene3d.height = overlay.height;
+      overlayCtx.drawImage(video, 0, 0, overlay.width, overlay.height);
+      const imageData = overlayCtx.getImageData(0, 0, overlay.width, overlay.height);
+      const markers = detector.detect(imageData);
+      const poses = markers.map(estimatePose).filter(Boolean);
+      drawOverlay(markers, poses);
+      drawScene(poses);
+      updateReadout(poses);
+      setStatus(poses.length
+        ? 'Pose uses OpenCV-style planar object points and a browser-side camera matrix approximation.'
+        : 'Searching for marker candidates.');
+    }
+
+    [downscale, scanRate, markerSize, focalScale, sceneZoom].forEach((input) => {
+      input.addEventListener('input', updateLabels);
+    });
+    testMarkerId.addEventListener('input', drawTestMarker);
+    startBtn.addEventListener('click', () => {
+      startCamera().catch((error) => setStatus(`Camera start failed: ${error.message}`));
+    });
+    stopBtn.addEventListener('click', stopCamera);
+
+    updateLabels();
+    listCameras();
+    window.addEventListener('load', drawTestMarker);
+  </script>
+</body>
+</html>

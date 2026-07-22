@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BCR Arm Browser Control</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Vite + ROS 2 Bridge</p>
+        <h1>BCR Arm Control</h1>
+        <p class="lede">
+          Browser controls on top of the existing ROS 2 joint trajectory controller.
+          Gazebo keeps the physics; this page handles commands and status.
+        </p>
+      </section>
+
+      <section class="panel viewer-panel">
+        <div class="panel-head">
+          <div>
+            <h2>3D Viewer</h2>
+            <p class="subtle">Orbit: drag. Pan: Shift+drag, Ctrl+drag, or right-drag. Zoom: mouse wheel.</p>
+          </div>
+          <div class="viewer-toolbar">
+            <a class="button-link" href="./aruco-calibration.html">ArUco Calibration</a>
+            <label class="vector-size-control" for="accelerometer-vector-scale">
+              <span>Vector size <output id="accelerometer-vector-scale-value" for="accelerometer-vector-scale">1.0×</output></span>
+              <input id="accelerometer-vector-scale" type="range" min="0.5" max="3" step="0.1" value="1" />
+            </label>
+            <button id="toggle-accelerometer-vectors" type="button">Hide MPU XYZ</button>
+            <button id="reset-camera" type="button">Reset Camera</button>
+            <button id="auto-zoom-out" type="button">Auto Zoom Out</button>
+          </div>
+        </div>
+        <canvas id="viewer" width="900" height="500"></canvas>
+        <div id="accelerometer-3d-legend" class="accelerometer-3d-legend" aria-label="Accelerometer vector legend">
+          <span><i class="axis-swatch axis-x"></i>X component</span>
+          <span><i class="axis-swatch axis-y"></i>Y component</span>
+          <span><i class="axis-swatch axis-z"></i>Z component</span>
+          <span><i class="axis-swatch axis-resultant"></i>resultant acceleration</span>
+          <small>Raw sensor-frame vectors; mounting alignment has not yet been applied.</small>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Presets</h2>
+          <label>
+            Duration (s)
+            <input id="preset-duration" type="number" min="0.5" step="0.5" value="1" />
+          </label>
+        </div>
+        <div id="pose-buttons" class="pose-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Custom Joints</h2>
+          <label>
+            Duration (s)
+            <input id="custom-duration" type="number" min="0.5" step="0.5" value="1" />
+          </label>
+        </div>
+        <form id="joint-form" class="joint-grid"></form>
+        <div class="actions">
+          <button id="send-custom" class="primary" type="button">Send Current Joint Values</button>
+          <button id="copy-current" type="button">Load Current State</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Direct Command</h2>
+          <label>
+            Duration (s)
+            <input id="direct-duration" type="number" min="0.5" step="0.5" value="1" />
+          </label>
+        </div>
+        <label>
+          Joint command list (degrees, 7 comma-separated values, multiple commands separated by semicolons)
+          <input
+            id="direct-command"
+            type="text"
+            value="0, 0, 0, 0, 0, 0, 0"
+          />
+        </label>
+        <div class="actions">
+          <button id="send-direct" type="button">Send Direct Command</button>
+        </div>
+      </section>
+
+      <section class="panel calibration-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Manual setup</p>
+            <h2>Pre-calibration</h2>
+            <p class="subtle">Move the model to a safe pose, then press Record Current Pose to save that pose and its live sensor readings. Check Load / reload beside each saved recording you want included; only checked recordings reload after a browser refresh.</p>
+          </div>
+          <div class="calibration-actions">
+            <label>
+              Sensor source
+              <select id="calibration-source">
+                <option value="accel">Accelerometers</option>
+                <option value="camera">Camera 0</option>
+                <option value="both" selected>Both</option>
+              </select>
+            </label>
+            <button id="calibrate-current" class="calibration-record" type="button">Record Current Pose</button>
+          </div>
+        </div>
+        <div class="calibration-targets" aria-label="Calibration target angles">
+          <label>
+            Base Target
+            <input id="calibration-target-base" type="number" step="1" value="0" />
+          </label>
+          <label>
+            Shoulder Target
+            <input id="calibration-target-shoulder" type="number" step="1" value="0" />
+          </label>
+          <label>
+            Elbow Target
+            <input id="calibration-target-elbow" type="number" step="1" value="0" />
+          </label>
+          <label>
+            Wrist Target
+            <input id="calibration-target-wrist" type="number" step="1" value="0" />
+          </label>
+        </div>
+        <div id="calibration-status" class="subtle">Waiting for UDP readings...</div>
+        <div class="calibration-table-wrap">
+          <table class="calibration-table">
+            <thead>
+              <tr>
+                <th>Load / reload</th>
+                <th>Orientation</th>
+                <th>Time</th>
+                <th>Base UDP</th>
+                <th>Shoulder UDP</th>
+                <th>Elbow UDP</th>
+                <th>Wrist UDP</th>
+                <th>Base Target</th>
+                <th>Shoulder Target</th>
+                <th>Elbow Target</th>
+                <th>Wrist Target</th>
+                <th>Samples</th>
+              </tr>
+            </thead>
+            <tbody id="calibration-rows">
+              <tr>
+                <td colspan="12">No calibration poses recorded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="calibration-finish">
+          <div id="calibration-coverage" class="subtle">Record at least three varied orientations to finish calibration.</div>
+          <div class="actions">
+            <button id="uncalibrate-current" type="button" disabled>Unlock &amp; Recalibrate</button>
+            <button id="clear-loaded-calibration" type="button">Clear Loaded Readings</button>
+            <button id="finish-calibration" class="primary" type="button">Complete Calibration</button>
+            <span id="calibration-completion-message" class="sync-status sync-warn" role="status" aria-live="assertive">Need three recorded orientations.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel live-input-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Real-time hardware</p>
+            <h2>Live Sensor Feeds</h2>
+            <p class="subtle">Each row is a direct current reading from one physical input. A red row means that input has not sent usable data.</p>
+          </div>
+        </div>
+        <div class="live-feed-grid">
+          <div>
+            <h3>Camera 0</h3>
+            <div id="live-camera-feeds" class="live-feed-list" aria-live="polite"></div>
+          </div>
+          <div>
+            <h3>Accelerometers</h3>
+            <div id="live-accelerometer-feeds" class="live-feed-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Motion Sequences</h2>
+          <span class="subtle">Common multi-step moves</span>
+        </div>
+        <div id="sequence-buttons" class="pose-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Imported Models</h2>
+          <span class="subtle">Import GLB/GLTF/OBJ into the active scene and remove later</span>
+        </div>
+        <input id="import-model-file" type="file" accept=".glb,.gltf,.obj,.stl" hidden />
+        <div class="item-controls">
+          <div class="actions">
+            <button id="import-model-button" type="button">Import 3D Model</button>
+          </div>
+          <label>
+            Imported models
+            <select id="imported-model-select">
+              <option value="">No models imported</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button id="remove-imported-model-button" type="button">Remove Selected Model</button>
+          </div>
+        </div>
+        <div id="imported-model-status" class="subtle"></div>
+      </section>
+
+      <section class="panel status-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Status</h2>
+            <div class="sync-row">
+              <button id="sync-robot" type="button">Sync With Robot</button>
+              <span id="sync-status" class="sync-status sync-warn">Bridge not checked yet</span>
+            </div>
+          </div>
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+        <pre id="status-output">Loading...</pre>
+      </section>
+
+      <section class="panel command-panel">
+        <div class="panel-head">
+          <h2>Command Log</h2>
+          <button id="clear-commands" type="button">Clear Commands</button>
+        </div>
+        <div id="command-log" class="command-log">No commands sent yet.</div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

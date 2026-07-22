@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -47,7 +48,7 @@ struct Options {
   int downscale = 640;
   int colorLineCropPercent = 34;
   bool colorLineRadialScans = false;
-  int expectedPairs = 10;
+  int ringPositions = 19;
   int threshold = 128;
   int tileWidth = 0;
   double fps = 0.0;
@@ -60,7 +61,6 @@ struct Options {
   bool useThreshold = false;
   bool autoThreshold = false;
   bool bestThreshold = false;
-  bool simpleCross = true;
   bool robustColor = false;
   bool noWindow = false;
   bool separateWindows = false;
@@ -78,17 +78,18 @@ struct Marker {
   double area = 0.0;
 };
 
-struct Pair {
-  int index = 0;
-  Marker inner;
-  Marker outer;
-  cv::Point2f innerCenter;
-  cv::Point2f outerCenter;
-  double expectedAngle = 0.0;
+struct MarkerAngle {
+  int id = -1;
+  cv::Point2f center;
+  cv::Point2f axisTip;
+  double fixedAngle = 0.0;
+  double imageRotation = 0.0;
+  double angle = 0.0;
+  double weight = 0.0;
 };
 
 struct Score {
-  int pairCount = 0;
+  int angleCount = 0;
   int markerCount = 0;
   int expectedGap = 0;
   double area = 0.0;
@@ -105,7 +106,6 @@ struct CameraState {
   int index = 0;
   cv::VideoCapture cap;
   std::string windowName;
-  std::string portLabel;
   int frameNo = 0;
   int lastCaptureFpsTrack = 0;
 };
@@ -113,7 +113,7 @@ struct CameraState {
 struct FrameResult {
   cv::Mat display;
   std::vector<Marker> markers;
-  std::vector<Pair> pairs;
+  std::vector<MarkerAngle> markerAngles;
   std::optional<double> upAngle;
   std::optional<double> stripeAngle;
   std::optional<double> imageNormalAngle;
@@ -173,7 +173,6 @@ struct ColorLineFit {
 
 struct CameraFrame {
   int cameraIndex = 0;
-  std::string portLabel;
   int frameNo = 0;
   double captureFps = 0.0;
   FrameResult result;
@@ -183,34 +182,6 @@ double normalizeDeg(double value) {
   double result = std::fmod(value, 360.0);
   if (result < 0.0) result += 360.0;
   return result;
-}
-
-std::string usbPortLabelForCamera(int cameraIndex) {
-  namespace fs = std::filesystem;
-  const fs::path devPath = fs::path("/dev") / ("video" + std::to_string(cameraIndex));
-  std::error_code ec;
-  const fs::path canonicalDev = fs::weakly_canonical(devPath, ec);
-  if (ec) return "port unknown";
-
-  const fs::path byPathDir("/dev/v4l/by-path");
-  if (!fs::exists(byPathDir, ec)) return "port unknown";
-
-  for (const auto& entry : fs::directory_iterator(byPathDir, ec)) {
-    if (ec) break;
-    const std::string name = entry.path().filename().string();
-    if (name.find("video-index0") == std::string::npos) continue;
-    const fs::path resolved = fs::weakly_canonical(entry.path(), ec);
-    if (ec || resolved != canonicalDev) continue;
-
-    const std::string marker = "usb-0:";
-    const size_t start = name.find(marker);
-    if (start == std::string::npos) return name;
-    const size_t end = name.find(":1.0", start);
-    if (end == std::string::npos) return name.substr(start);
-    return name.substr(start, end - start);
-  }
-
-  return "port unknown";
 }
 
 double detectedColorLineAngleFromRaw(double rawAngle) {
@@ -223,10 +194,6 @@ cv::Point2f markerCenter(const Marker& marker) {
   return sum * (1.0f / static_cast<float>(marker.corners.size()));
 }
 
-int pairPartnerId(int id) {
-  return (id % 2 == 1) ? id + 1 : id - 1;
-}
-
 std::optional<int> slotToEvenIndex(int slot, int total) {
   for (int i = 0; i < total; ++i) {
     if (std::floor((static_cast<double>(i) * kAngleSlotCount) / total) == slot) return i;
@@ -234,9 +201,10 @@ std::optional<int> slotToEvenIndex(int slot, int total) {
   return std::nullopt;
 }
 
-double pairFixedAngle(const Pair& pair, int total) {
-  auto evenIndex = slotToEvenIndex(pair.index, total);
-  if (!evenIndex) return pair.expectedAngle;
+double markerFixedAngle(int markerId, int total) {
+  const int slot = (markerId - 1) / 2;
+  auto evenIndex = slotToEvenIndex(slot, total);
+  if (!evenIndex) return normalizeDeg((static_cast<double>(slot) / kAngleSlotCount) * 360.0);
   return normalizeDeg((static_cast<double>(*evenIndex) / total) * 360.0);
 }
 
@@ -412,64 +380,57 @@ std::vector<Marker> detectMarkers(const cv::Mat& frame) {
   return unique;
 }
 
-std::vector<Pair> findMarkerPairs(const std::vector<Marker>& markers) {
-  std::map<int, Marker> byId;
-  for (const auto& marker : markers) byId[marker.id] = marker;
+std::optional<MarkerAngle> measureMarkerAngle(const Marker& marker, int ringPositions) {
+  if (marker.id < 1 || marker.id > kAngleSlotCount * 2 || marker.corners.size() != 4) {
+    return std::nullopt;
+  }
 
-  std::set<int> claimed;
-  std::vector<Pair> pairs;
+  // Decoding rotates the corners into the marker's canonical order. Average
+  // both horizontal edges and both vertical edges to estimate the direction
+  // of the code's own top edge, even when the square is mildly distorted.
+  const cv::Point2f horizontal =
+      (marker.corners[1] - marker.corners[0]) + (marker.corners[2] - marker.corners[3]);
+  const cv::Point2f vertical =
+      (marker.corners[2] - marker.corners[1]) + (marker.corners[3] - marker.corners[0]);
+  cv::Point2f rightAxis = horizontal + cv::Point2f(vertical.y, -vertical.x);
+  const double axisLength = std::hypot(rightAxis.x, rightAxis.y);
+  if (axisLength < 1e-9) return std::nullopt;
+  rightAxis *= static_cast<float>(1.0 / axisLength);
+
+  MarkerAngle reading;
+  reading.id = marker.id;
+  reading.center = markerCenter(marker);
+  const double displayLength = std::clamp(std::sqrt(std::max(0.0, marker.area)) * 0.8, 12.0, 40.0);
+  reading.axisTip = reading.center + rightAxis * static_cast<float>(displayLength);
+  reading.fixedAngle = markerFixedAngle(marker.id, ringPositions);
+  reading.imageRotation = normalizeDeg(std::atan2(rightAxis.y, rightAxis.x) * 180.0 / CV_PI);
+  // The printed code is tangential to its fixed ring position. Subtracting
+  // its observed clockwise rotation preserves the reader's existing "up"
+  // convention while making every single visible code an angle source.
+  reading.angle = normalizeDeg(reading.fixedAngle - reading.imageRotation);
+  reading.weight = std::max(1.0, marker.area);
+  return reading;
+}
+
+std::vector<MarkerAngle> measureMarkerAngles(const std::vector<Marker>& markers, int ringPositions) {
+  std::vector<MarkerAngle> readings;
+  readings.reserve(markers.size());
   for (const auto& marker : markers) {
-    if (claimed.count(marker.id)) continue;
-    int partnerId = pairPartnerId(marker.id);
-    auto partnerIt = byId.find(partnerId);
-    if (partnerIt == byId.end() || claimed.count(partnerId) || partnerId == marker.id) continue;
-
-    claimed.insert(marker.id);
-    claimed.insert(partnerId);
-    const bool isOddFirst = marker.id % 2 == 1;
-    Pair pair;
-    pair.inner = isOddFirst ? marker : partnerIt->second;
-    pair.outer = isOddFirst ? partnerIt->second : marker;
-    pair.innerCenter = markerCenter(pair.inner);
-    pair.outerCenter = markerCenter(pair.outer);
-    pair.index = (pair.inner.id - 1) / 2;
-    pair.expectedAngle = normalizeDeg((static_cast<double>(pair.index) / kAngleSlotCount) * 360.0);
-    pairs.push_back(pair);
+    if (auto reading = measureMarkerAngle(marker, ringPositions)) readings.push_back(*reading);
   }
-
-  std::sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) {
-    return a.index < b.index;
-  });
-  return pairs;
+  return readings;
 }
 
-std::optional<std::pair<cv::Point2f, std::vector<Pair>>> estimateRingPairs(const std::vector<Marker>& markers) {
-  auto pairs = findMarkerPairs(markers);
-  if (pairs.empty()) return std::nullopt;
-  cv::Point2f center(0.0f, 0.0f);
-  for (const auto& pair : pairs) center += (pair.innerCenter + pair.outerCenter) * 0.5f;
-  center *= 1.0f / static_cast<float>(pairs.size());
-  return std::make_pair(center, pairs);
-}
-
-std::optional<double> computeUpValue(const std::vector<Pair>& pairs, int expectedTotal) {
-  double bestCosine = -2.0;
-  std::optional<double> bestAngle;
-  for (const auto& pair : pairs) {
-    double dx = pair.outerCenter.x - pair.innerCenter.x;
-    double dy = pair.outerCenter.y - pair.innerCenter.y;
-    double len = std::hypot(dx, dy);
-    if (len < 1e-9) continue;
-    double dot = -dy;
-    double cross = -dx;
-    double cosine = std::clamp(dot / len, -1.0, 1.0);
-    if (cosine > bestCosine) {
-      bestCosine = cosine;
-      double offset = std::atan2(cross, dot) * 180.0 / CV_PI;
-      bestAngle = normalizeDeg(pairFixedAngle(pair, expectedTotal) + offset);
-    }
+std::optional<double> computeUpValue(const std::vector<MarkerAngle>& readings) {
+  double x = 0.0;
+  double y = 0.0;
+  for (const auto& reading : readings) {
+    const double radians = reading.angle * CV_PI / 180.0;
+    x += std::cos(radians) * reading.weight;
+    y += std::sin(radians) * reading.weight;
   }
-  return bestAngle;
+  if (std::hypot(x, y) < 1e-9) return std::nullopt;
+  return normalizeDeg(std::atan2(y, x) * 180.0 / CV_PI);
 }
 
 double markerSetArea(const std::vector<Marker>& markers) {
@@ -479,23 +440,17 @@ double markerSetArea(const std::vector<Marker>& markers) {
 }
 
 Score scoreThresholdPass(const std::vector<Marker>& markers, const Options& options) {
-  std::vector<Pair> pairs;
-  if (options.simpleCross) {
-    pairs = findMarkerPairs(markers);
-  } else {
-    auto fit = estimateRingPairs(markers);
-    if (fit) pairs = fit->second;
-  }
+  const auto readings = measureMarkerAngles(markers, options.ringPositions);
   return {
-    static_cast<int>(pairs.size()),
+    static_cast<int>(readings.size()),
     static_cast<int>(markers.size()),
-    std::abs(options.expectedPairs - static_cast<int>(pairs.size())),
+    std::abs(options.ringPositions - static_cast<int>(readings.size())),
     markerSetArea(markers),
   };
 }
 
 bool betterPass(const ThresholdPass& a, const ThresholdPass& b) {
-  if (a.score.pairCount != b.score.pairCount) return a.score.pairCount > b.score.pairCount;
+  if (a.score.angleCount != b.score.angleCount) return a.score.angleCount > b.score.angleCount;
   if (a.score.markerCount != b.score.markerCount) return a.score.markerCount > b.score.markerCount;
   if (a.score.expectedGap != b.score.expectedGap) return a.score.expectedGap < b.score.expectedGap;
   return a.score.area > b.score.area;
@@ -930,25 +885,22 @@ void drawColorLineOverlay(cv::Mat& frame, const FrameResult& result) {
               cv::FONT_HERSHEY_SIMPLEX, 0.55, {0, 255, 255}, 2, cv::LINE_AA);
 }
 
-void drawOverlay(cv::Mat& frame, const std::vector<Marker>& markers, const std::vector<Pair>& pairs,
-                 std::optional<double> upAngle, int expectedPairs) {
-  std::set<int> pairedIds;
-  for (const auto& pair : pairs) {
-    pairedIds.insert(pair.inner.id);
-    pairedIds.insert(pair.outer.id);
+void drawOverlay(cv::Mat& frame, const std::vector<Marker>& markers,
+                 const std::vector<MarkerAngle>& markerAngles, std::optional<double> upAngle) {
+  std::set<int> measuredIds;
+  for (const auto& reading : markerAngles) {
+    measuredIds.insert(reading.id);
+    const int slot = (reading.id - 1) / 2;
+    const auto color = bgrForIndex(slot);
+    drawVector(frame, reading.center, reading.axisTip, color);
+    drawCross(frame, reading.center, color, 10);
+    std::ostringstream label;
+    label << "#" << reading.id << " up=" << std::fixed << std::setprecision(1) << reading.angle;
+    cv::putText(frame, label.str(), reading.axisTip + cv::Point2f(4.0f, -4.0f),
+                cv::FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv::LINE_AA);
   }
   for (const auto& marker : markers) {
-    if (!pairedIds.count(marker.id)) drawCross(frame, markerCenter(marker), {80, 255, 80}, 10);
-  }
-  for (const auto& pair : pairs) {
-    auto color = bgrForIndex(pair.index);
-    drawVector(frame, pair.innerCenter, pair.outerCenter, color);
-    drawCross(frame, pair.innerCenter, color, 12);
-    drawCross(frame, pair.outerCenter, color, 12);
-    std::ostringstream label;
-    label << std::fixed << std::setprecision(1) << pairFixedAngle(pair, expectedPairs);
-    cv::Point2f mid = (pair.innerCenter + pair.outerCenter) * 0.5f;
-    cv::putText(frame, label.str(), mid, cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_AA);
+    if (!measuredIds.count(marker.id)) drawCross(frame, markerCenter(marker), {80, 255, 80}, 10);
   }
   if (upAngle) {
     cv::Point2f anchor(frame.cols * 0.5f, frame.rows * 0.25f);
@@ -981,10 +933,9 @@ cv::Mat composeMosaic(const std::vector<CameraFrame>& frames, int requestedTileW
 
     std::ostringstream label;
     label << "cam " << frames[i].cameraIndex
-          << " " << frames[i].portLabel
           << " | cap " << frames[i].captureFps
           << " | ms " << frames[i].result.elapsedMs
-          << " | pairs " << frames[i].result.pairs.size()
+          << " | codes " << frames[i].result.markerAngles.size()
           << " | angle "
           << (frames[i].result.upAngle ? std::to_string(*frames[i].result.upAngle).substr(0, 6) : "n/a");
     cv::rectangle(mosaic, {roi.x, roi.y}, {roi.x + tileWidth, roi.y + 28}, {0, 0, 0}, cv::FILLED);
@@ -1010,7 +961,7 @@ FrameResult processCameraFrame(const cv::Mat& frame, const Options& options) {
     result.markers = pass.markers;
     std::ostringstream summary;
     summary << "best t=" << pass.threshold << " " << result.markers.size()
-            << " markers/" << pass.score.pairCount << " pairs";
+            << " markers/" << pass.score.angleCount << " angle codes";
     result.thresholdSummary = summary.str();
     if (options.useThreshold) result.display = applyIntensityThreshold(preview, pass.threshold);
   } else if (options.autoThreshold) {
@@ -1033,13 +984,8 @@ FrameResult processCameraFrame(const cv::Mat& frame, const Options& options) {
     result.markers = detectMarkers(detectFrame);
   }
 
-  if (options.simpleCross) {
-    result.pairs = findMarkerPairs(result.markers);
-  } else {
-    auto fit = estimateRingPairs(result.markers);
-    if (fit) result.pairs = fit->second;
-  }
-  result.upAngle = computeUpValue(result.pairs, options.expectedPairs);
+  result.markerAngles = measureMarkerAngles(result.markers, options.ringPositions);
+  result.upAngle = computeUpValue(result.markerAngles);
   result.elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - start).count();
   return result;
@@ -1058,6 +1004,31 @@ std::vector<int> parseCameraList(const std::string& value) {
 
 std::vector<int> detectConnectedCameras(int maxCameraIndex) {
   std::vector<int> cameras;
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path videoClass("/sys/class/video4linux");
+  if (fs::exists(videoClass, ec)) {
+    for (const auto& entry : fs::directory_iterator(videoClass, ec)) {
+      if (ec) break;
+      const std::string name = entry.path().filename().string();
+      if (name.rfind("video", 0) != 0) continue;
+      const int cameraIndex = std::atoi(name.substr(5).c_str());
+      std::ifstream indexFile(entry.path() / "index");
+      int deviceIndex = -1;
+      indexFile >> deviceIndex;
+      if (deviceIndex == 0) {
+        cameras.push_back(cameraIndex);
+      }
+    }
+    std::sort(cameras.begin(), cameras.end());
+    if (!cameras.empty()) {
+      for (int cameraIndex : cameras) {
+        std::cerr << "Detected capture camera index " << cameraIndex << "\n";
+      }
+      return cameras;
+    }
+  }
+
   for (int cameraIndex = 0; cameraIndex <= maxCameraIndex; ++cameraIndex) {
     cv::VideoCapture cap(cameraIndex, cv::CAP_V4L2);
     if (!cap.isOpened()) continue;
@@ -1080,7 +1051,7 @@ std::string formatAngle(std::optional<double> angle, int precision = 2) {
 
 // ---------------------------------------------------------------------------
 // Telemetry networking: one shared TCP port and one shared UDP port. Every
-// camera's per-frame result (angle/pairs/markers) is broadcast to whoever is
+// camera's per-frame result (angle/codes/markers) is broadcast to whoever is
 // listening. A "camera" field in each JSON line tells clients which camera a
 // message came from, so multiple cameras can share a single port pair.
 //
@@ -1101,36 +1072,15 @@ std::string jsonAngleField(std::optional<double> angle) {
   return formatAngle(angle, 6);
 }
 
-std::string jsonStringField(const std::string& value) {
-  std::ostringstream out;
-  out << "\"";
-  for (char ch : value) {
-    if (ch == '"' || ch == '\\') {
-      out << '\\' << ch;
-    } else if (ch == '\n') {
-      out << "\\n";
-    } else if (ch == '\r') {
-      out << "\\r";
-    } else if (ch == '\t') {
-      out << "\\t";
-    } else {
-      out << ch;
-    }
-  }
-  out << "\"";
-  return out.str();
-}
-
 std::string buildTelemetryJson(int64_t tsMs, int cameraIndex, int frameNo,
-                               const std::string& portLabel, const FrameResult& result, int expectedPairs) {
+                               const FrameResult& result, int ringPositions) {
   std::ostringstream out;
   out << "{\"ts_ms\":" << tsMs
       << ",\"camera\":" << cameraIndex
-      << ",\"port_label\":" << jsonStringField(portLabel)
       << ",\"frame\":" << frameNo
       << ",\"angle\":" << jsonAngleField(result.upAngle)
-      << ",\"pairs\":" << result.pairs.size()
-      << ",\"expected_pairs\":" << expectedPairs
+      << ",\"codes\":" << result.markerAngles.size()
+      << ",\"ring_positions\":" << ringPositions
       << ",\"markers\":" << result.markers.size()
       << ",\"elapsed_ms\":" << result.elapsedMs
       << "}";
@@ -1321,7 +1271,8 @@ void printUsage(const char* name) {
       << "  --color-line-radial   use 8 radial scanlines instead of stable 2-line mode\n"
       << "  --robust-color        use color_line_reader robust color thresholds\n"
       << "  --tile-width N        grid display tile width; 0 = auto\n"
-      << "  --expected-pairs N    expected printed pairs (default 10)\n"
+      << "  --ring-positions N    printed code positions around the wheel (default 19)\n"
+      << "  --expected-pairs N    deprecated alias for --ring-positions\n"
       << "  --threshold N         fixed threshold 0..255\n"
       << "  --exposure N          requested camera exposure value\n"
       << "  --gain N              requested camera gain value\n"
@@ -1331,11 +1282,10 @@ void printUsage(const char* name) {
       << "  --use-threshold       run fixed threshold preview/detection\n"
       << "  --auto-threshold      combine 30/50/70 percent thresholds\n"
       << "  --best-threshold      binary-style per-frame threshold search\n"
-      << "  --ring-fit            use ring-fit pair mode instead of simple pair mode\n"
       << "  --no-window           print results without opening an OpenCV window\n"
       << "  --separate-windows    show one OpenCV window per camera instead of a grid\n"
       << "  --angle-line          print one updating line with all camera angles\n"
-      << "  --angle-csv           print timestamp,camera,angle,pairs,markers rows\n"
+      << "  --angle-csv           print timestamp,camera,angle,codes,markers rows\n"
       << "  --tcp-port N          serve telemetry JSON to any TCP client on port N\n"
       << "  --udp-port N          serve telemetry JSON to UDP clients that send a\n"
       << "                        subscribe datagram (any bytes) to port N\n"
@@ -1344,7 +1294,7 @@ void printUsage(const char* name) {
       << "Telemetry (--tcp-port / --udp-port), one shared port for all cameras:\n"
       << "  Each processed frame emits one JSON line, e.g.:\n"
       << "    {\"ts_ms\":1731093012345,\"camera\":0,\"frame\":42,\"angle\":187.512400,\n"
-      << "     \"pairs\":9,\"expected_pairs\":10,\"markers\":18,\"elapsed_ms\":6}\n"
+      << "     \"codes\":4,\"ring_positions\":19,\"markers\":4,\"elapsed_ms\":6}\n"
       << "  TCP: connect and read newline-delimited JSON, e.g. `nc HOST PORT`.\n"
       << "  UDP target: actively send packets, e.g. `--udp-target 127.0.0.1:5001`.\n"
       << "  UDP subscribe: bind a client port, send any datagram to --udp-port, then\n"
@@ -1352,10 +1302,10 @@ void printUsage(const char* name) {
       << "\n"
       << "Runtime keys in the preview window:\n"
       << "  q/Esc quit, +/- threshold, [/] process FPS, t fixed threshold,\n"
-      << "  a auto threshold, b best threshold, r ring/simple mode\n"
+      << "  a auto threshold, b best threshold\n"
       << "Preview trackbars:\n"
       << "  Threshold, Mode 0 raw/1 fixed/2 auto/3 best, Process FPS,\n"
-      << "  Capture FPS request, Expected pairs\n";
+      << "  Capture FPS request, Ring positions\n";
 }
 
 bool parseArgs(int argc, char** argv, Options& options) {
@@ -1401,8 +1351,8 @@ bool parseArgs(int argc, char** argv, Options& options) {
       options.robustColor = true;
     } else if (arg == "--tile-width") {
       if (!readInt(options.tileWidth)) return false;
-    } else if (arg == "--expected-pairs") {
-      if (!readInt(options.expectedPairs)) return false;
+    } else if (arg == "--ring-positions" || arg == "--expected-pairs") {
+      if (!readInt(options.ringPositions)) return false;
     } else if (arg == "--threshold") {
       if (!readInt(options.threshold)) return false;
     } else if (arg == "--exposure") {
@@ -1422,7 +1372,7 @@ bool parseArgs(int argc, char** argv, Options& options) {
     } else if (arg == "--best-threshold") {
       options.bestThreshold = true;
     } else if (arg == "--ring-fit") {
-      options.simpleCross = false;
+      std::cerr << "--ring-fit is deprecated and ignored; marker orientation mode is always active\n";
     } else if (arg == "--no-window") {
       options.noWindow = true;
     } else if (arg == "--separate-windows") {
@@ -1450,7 +1400,7 @@ bool parseArgs(int argc, char** argv, Options& options) {
   options.downscale = std::max(1, options.downscale);
   options.colorLineCropPercent = std::clamp(options.colorLineCropPercent, 5, 100);
   options.tileWidth = std::max(0, options.tileWidth);
-  options.expectedPairs = std::max(1, options.expectedPairs);
+  options.ringPositions = std::clamp(options.ringPositions, 1, kAngleSlotCount);
   options.printEvery = std::max(1, options.printEvery);
   options.processFps = std::max(0.0, options.processFps);
   options.tcpPort = std::max(0, options.tcpPort);
@@ -1470,6 +1420,7 @@ void setIfRequested(cv::VideoCapture& cap, int prop, double value, const char* n
 
 }  // namespace
 
+#ifndef BASIC_FIDUCIAL_READER_NO_MAIN
 int main(int argc, char** argv) {
   Options options;
   if (!parseArgs(argc, argv, options)) {
@@ -1485,8 +1436,7 @@ int main(int argc, char** argv) {
   for (int cameraIndex : options.cameras) {
     CameraState state;
     state.index = cameraIndex;
-    state.portLabel = usbPortLabelForCamera(cameraIndex);
-    state.windowName = "basic fiducial native reader cam " + std::to_string(cameraIndex) + " " + state.portLabel;
+    state.windowName = "basic fiducial native reader cam " + std::to_string(cameraIndex);
     state.cap.open(cameraIndex, cv::CAP_V4L2);
     if (!state.cap.isOpened()) {
       std::cerr << "Failed to open camera index " << cameraIndex << "\n";
@@ -1502,7 +1452,6 @@ int main(int argc, char** argv) {
     setIfRequested(state.cap, cv::CAP_PROP_CONTRAST, options.contrast, "contrast");
 
     std::cerr << "camera=" << state.index
-              << " port=" << state.portLabel
               << " capture=" << state.cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x" << state.cap.get(cv::CAP_PROP_FRAME_HEIGHT)
               << " fps=" << state.cap.get(cv::CAP_PROP_FPS)
               << " processing_width=" << options.downscale
@@ -1559,7 +1508,7 @@ int main(int argc, char** argv) {
   int captureFpsTrack = options.fps > 0.0
       ? static_cast<int>(std::round(options.fps))
       : static_cast<int>(std::round(cameras.front().cap.get(cv::CAP_PROP_FPS)));
-  int expectedPairsTrack = options.expectedPairs;
+  int ringPositionsTrack = options.ringPositions;
   for (auto& camera : cameras) camera.lastCaptureFpsTrack = captureFpsTrack;
   if (!options.noWindow) {
     if (gridWindow) {
@@ -1571,7 +1520,7 @@ int main(int argc, char** argv) {
     cv::createTrackbar("Mode 0raw 1fix 2auto 3best", controlsWindowName, &modeTrack, 3);
     cv::createTrackbar("Process FPS 0=max", controlsWindowName, &processFpsTrack, 60);
     cv::createTrackbar("Capture FPS request", controlsWindowName, &captureFpsTrack, 60);
-    cv::createTrackbar("Expected pairs", controlsWindowName, &expectedPairsTrack, 20);
+    cv::createTrackbar("Ring positions", controlsWindowName, &ringPositionsTrack, kAngleSlotCount);
   }
 
   auto nextFrameAt = std::chrono::steady_clock::now();
@@ -1581,7 +1530,7 @@ int main(int argc, char** argv) {
     if (!options.noWindow) {
       options.threshold = std::clamp(thresholdTrack, 0, 255);
       options.processFps = std::max(0, processFpsTrack);
-      options.expectedPairs = std::max(1, expectedPairsTrack);
+      options.ringPositions = std::clamp(ringPositionsTrack, 1, kAngleSlotCount);
       modeTrack = std::clamp(modeTrack, 0, 3);
       options.useThreshold = modeTrack == 1;
       options.autoThreshold = modeTrack == 2;
@@ -1612,8 +1561,27 @@ int main(int argc, char** argv) {
 
       auto result = processCameraFrame(frame, options);
 
+      if (!options.noWindow) {
+        if (options.readerMode == ReaderMode::COLOR_LINE) {
+          drawColorLineOverlay(result.display, result);
+        } else {
+          drawOverlay(result.display, result.markers, result.markerAngles, result.upAngle);
+        }
+        std::ostringstream hud;
+        hud << "cam " << camera.index
+            << " | cap " << camera.cap.get(cv::CAP_PROP_FPS)
+            << " fps | proc " << (options.processFps > 0.0 ? std::to_string(options.processFps) : "max")
+            << " | t=" << options.threshold
+            << " | angle=" << formatAngle(result.upAngle, 2)
+            << " | mode=" << (options.readerMode == ReaderMode::COLOR_LINE
+                ? "color-line"
+                : (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw"))));
+        cv::putText(result.display, hud.str(), {12, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 2, cv::LINE_AA);
+      }
+
       if (telemetryEnabled) {
-        telemetry.broadcast(buildTelemetryJson(nowMs, camera.index, camera.frameNo, camera.portLabel, result, options.expectedPairs));
+        telemetry.broadcast(buildTelemetryJson(
+            nowMs, camera.index, camera.frameNo, result, options.ringPositions));
       }
 
       std::ostringstream ids;
@@ -1624,13 +1592,13 @@ int main(int argc, char** argv) {
       if (camera.frameNo % options.printEvery == 0) {
         std::ostringstream part;
         part << "cam" << camera.index << "=" << formatAngle(result.upAngle, 2)
-             << "(" << result.pairs.size() << "/" << options.expectedPairs << ")";
+             << "(" << result.markerAngles.size() << " codes)";
         angleParts.push_back(part.str());
 
         if (options.angleCsv) {
           std::cout << nowMs << "," << camera.index << ","
                     << formatAngle(result.upAngle, 6) << ","
-                    << result.pairs.size() << ","
+                    << result.markerAngles.size() << ","
                     << result.markers.size() << ","
                     << result.elapsedMs << "\n";
         } else if (!options.angleLine) {
@@ -1638,7 +1606,8 @@ int main(int argc, char** argv) {
                     << "\t\tframe=" << camera.frameNo
                     << "\t\tms=" << result.elapsedMs
                     << "\t\tmarkers=" << result.markers.size()
-                    << "\t\tpairs=" << result.pairs.size() << "/" << options.expectedPairs
+                    << "\t\tcodes=" << result.markerAngles.size()
+                    << "\t\tring_positions=" << options.ringPositions
                     << "\t\tangle=" << formatAngle(result.upAngle, 6)
                     << "\t\tids=" << ids.str();
           if (!result.thresholdSummary.empty()) std::cout << "\t\t" << result.thresholdSummary;
@@ -1647,27 +1616,9 @@ int main(int argc, char** argv) {
       }
       camera.frameNo++;
 
-      if (!options.noWindow) {
-        if (options.readerMode == ReaderMode::COLOR_LINE) {
-          drawColorLineOverlay(result.display, result);
-        } else {
-          drawOverlay(result.display, result.markers, result.pairs, result.upAngle, options.expectedPairs);
-        }
-        std::ostringstream hud;
-        hud << "cam " << camera.index
-            << " " << camera.portLabel
-            << " | cap " << camera.cap.get(cv::CAP_PROP_FPS)
-            << " fps | proc " << (options.processFps > 0.0 ? std::to_string(options.processFps) : "max")
-            << " | t=" << options.threshold
-            << " | angle=" << formatAngle(result.upAngle, 2)
-            << " | mode=" << (options.readerMode == ReaderMode::COLOR_LINE
-                ? "color-line"
-                : (options.bestThreshold ? "best" : (options.autoThreshold ? "auto" : (options.useThreshold ? "fixed" : "raw"))));
-        cv::putText(result.display, hud.str(), {12, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 2, cv::LINE_AA);
-        if (!gridWindow) cv::imshow(camera.windowName, result.display);
-      }
-      if (!options.noWindow && gridWindow) {
-        cameraFrames.push_back({camera.index, camera.portLabel, camera.frameNo, camera.cap.get(cv::CAP_PROP_FPS), std::move(result)});
+      if (!options.noWindow && !gridWindow) cv::imshow(camera.windowName, result.display);
+      if (gridWindow && !options.noWindow) {
+        cameraFrames.push_back({camera.index, camera.frameNo, camera.cap.get(cv::CAP_PROP_FPS), std::move(result)});
       }
     }
 
@@ -1680,11 +1631,14 @@ int main(int argc, char** argv) {
       std::cout << "        " << std::flush;
     }
 
-    if (!options.noWindow) {
-      if (gridWindow) {
-        cv::Mat mosaic = composeMosaic(cameraFrames, options.tileWidth);
-        if (!mosaic.empty()) cv::imshow(controlsWindowName, mosaic);
+    if (gridWindow && !options.noWindow) {
+      cv::Mat mosaic = composeMosaic(cameraFrames, options.tileWidth);
+      if (!mosaic.empty()) {
+        cv::imshow(controlsWindowName, mosaic);
       }
+    }
+
+    if (!options.noWindow) {
       int key = cv::waitKey(1);
       if (key == 27 || key == 'q' || key == 'Q') break;
       if (key == '+' || key == '=') thresholdTrack = std::min(255, thresholdTrack + 4);
@@ -1700,7 +1654,6 @@ int main(int argc, char** argv) {
       if (key == 'b' || key == 'B') {
         modeTrack = modeTrack == 3 ? 0 : 3;
       }
-      if (key == 'r' || key == 'R') options.simpleCross = !options.simpleCross;
       bool windowsVisible = false;
       if (gridWindow) {
         windowsVisible = cv::getWindowProperty(controlsWindowName, cv::WND_PROP_VISIBLE) >= 1.0;
@@ -1718,7 +1671,7 @@ int main(int argc, char** argv) {
       cv::setTrackbarPos("Mode 0raw 1fix 2auto 3best", controlsWindowName, modeTrack);
       cv::setTrackbarPos("Process FPS 0=max", controlsWindowName, processFpsTrack);
       cv::setTrackbarPos("Capture FPS request", controlsWindowName, captureFpsTrack);
-      cv::setTrackbarPos("Expected pairs", controlsWindowName, expectedPairsTrack);
+      cv::setTrackbarPos("Ring positions", controlsWindowName, ringPositionsTrack);
     }
 
     if (options.processFps > 0.0) {
@@ -1731,3 +1684,4 @@ int main(int argc, char** argv) {
   telemetry.stop();
   return 0;
 }
+#endif

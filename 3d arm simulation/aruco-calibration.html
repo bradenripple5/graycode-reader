@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArUco Arm Calibration</title>
+  </head>
+  <body>
+    <main class="shell aruco-shell">
+      <section class="hero">
+        <p class="eyebrow">Independent visual ground truth</p>
+        <h1>ArUco Arm Calibration</h1>
+        <p class="lede">Marker 0 is the base reference; markers 1, 2, and 3 move upward with the shoulder, elbow, and wrist links. Every camera frame is paired with the most recent complete accelerometer readings.</p>
+        <p><a href="./">Return to arm control</a></p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Live 3D marker viewer</h2>
+            <p id="aruco-connection" class="subtle">Waiting for the ArUco reader…</p>
+          </div>
+          <div class="actions compact-actions">
+            <button id="aruco-export" type="button">Export Session JSON</button>
+            <button id="aruco-reset" type="button">Reset Session</button>
+            <button id="aruco-complete" class="primary" type="button" disabled>Properly Calibrated</button>
+          </div>
+        </div>
+        <canvas id="aruco-viewer" width="900" height="480"></canvas>
+        <div class="marker-legend">
+          <span><i style="--marker-color:#d6ff57"></i>0 Base</span>
+          <span><i style="--marker-color:#7cd1ff"></i>1 Shoulder link</span>
+          <span><i style="--marker-color:#ff9f43"></i>2 Elbow link</span>
+          <span><i style="--marker-color:#d980fa"></i>3 Wrist link</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Calibration readiness</h2>
+            <p class="subtle">Move one joint at a time through at least 25°. A joint passes after sufficient independent travel and 95% of fitted errors are within ±2°.</p>
+          </div>
+          <span id="aruco-sample-count" class="sync-status sync-warn">0 synchronized frames</span>
+        </div>
+        <div id="joint-readiness" class="readiness-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Marker and accelerometer snapshot</h2>
+          <span id="aruco-frame-time" class="subtle">No frame received</span>
+        </div>
+        <div id="marker-cards" class="marker-card-grid"></div>
+        <div class="calibration-table-wrap aruco-table-wrap">
+          <table class="calibration-table">
+            <thead><tr><th>Accelerometer</th><th>XYZ (g)</th><th>Gyro XYZ (°/s)</th><th>Angle</th><th>Camera Δt</th></tr></thead>
+            <tbody id="aruco-accelerometers"><tr><td colspan="5">Waiting for accelerometers…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/arucoCalibration.js"></script>
+  </body>
+</html>

@@ -1021,6 +1021,34 @@ std::vector<int> detectCameraIndexes() {
   return cameras;
 }
 
+std::string usbPortLabelForCamera(int cameraIndex) {
+  namespace fs = std::filesystem;
+  const fs::path devPath = fs::path("/dev") / ("video" + std::to_string(cameraIndex));
+  std::error_code ec;
+  const fs::path canonicalDev = fs::weakly_canonical(devPath, ec);
+  if (ec) return "port unknown";
+
+  const fs::path byPathDir("/dev/v4l/by-path");
+  if (!fs::exists(byPathDir, ec)) return "port unknown";
+
+  for (const auto& entry : fs::directory_iterator(byPathDir, ec)) {
+    if (ec) break;
+    const std::string name = entry.path().filename().string();
+    if (name.find("video-index0") == std::string::npos) continue;
+    const fs::path resolved = fs::weakly_canonical(entry.path(), ec);
+    if (ec || resolved != canonicalDev) continue;
+
+    const std::string marker = "usb-0:";
+    const size_t start = name.find(marker);
+    if (start == std::string::npos) return name;
+    const size_t end = name.find(":1.0", start);
+    if (end == std::string::npos) return name.substr(start);
+    return name.substr(start, end - start);
+  }
+
+  return "port unknown";
+}
+
 int runCamera(Options options) {
   cv::VideoCapture cap(options.camera, cv::CAP_V4L2);
   if (!cap.isOpened()) {
@@ -1032,7 +1060,8 @@ int runCamera(Options options) {
   cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
   if (options.fps > 0.0) cap.set(cv::CAP_PROP_FPS, options.fps);
 
-  const std::string windowName = "parallel grayscale direction reader camera " + std::to_string(options.camera);
+  const std::string portLabel = usbPortLabelForCamera(options.camera);
+  const std::string windowName = "parallel grayscale direction reader camera " + std::to_string(options.camera) + " " + portLabel;
   if (!options.noWindow) cv::namedWindow(windowName, cv::WINDOW_NORMAL);
 
   AnalyzerState state;
@@ -1069,9 +1098,13 @@ int runCamera(Options options) {
 
     if (!options.noWindow) {
       drawOverlay(result.display, result, state.windowAngle, options.projectionMode);
+      const std::string hud = "cam " + std::to_string(options.camera) + " " + portLabel;
+      cv::rectangle(result.display, {0, 0}, {result.display.cols, 30}, {0, 0, 0}, cv::FILLED);
+      cv::putText(result.display, hud, {12, 22}, cv::FONT_HERSHEY_SIMPLEX, 0.62, {255, 255, 255}, 2, cv::LINE_AA);
       cv::imshow(windowName, result.display);
       const int key = cv::waitKey(1);
       if (key == 27 || key == 'q' || key == 'Q') g_running = false;
+      if (cv::getWindowProperty(windowName, cv::WND_PROP_VISIBLE) < 1.0) g_running = false;
     }
 
     if (options.processFps > 0.0) {

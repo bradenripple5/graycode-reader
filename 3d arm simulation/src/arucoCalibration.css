@@ -1,0 +1,56 @@
+.aruco-shell { width: min(1220px, calc(100vw - 32px)); }
+
+#aruco-viewer {
+  display: block;
+  width: 100%;
+  height: min(55vw, 480px);
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #0c1115;
+}
+
+.compact-actions { margin-top: 0; }
+
+.marker-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+.marker-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.marker-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--marker-color); }
+
+.readiness-grid,
+.marker-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.readiness-card,
+.marker-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.17);
+}
+
+.readiness-card.pass { border-color: rgba(155, 255, 132, 0.75); }
+.readiness-card h3,
+.marker-card h3 { margin: 0 0 8px; }
+.readiness-card dl,
+.marker-card dl { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; margin: 0; }
+.readiness-card dt,
+.marker-card dt { color: var(--muted); }
+.readiness-card dd,
+.marker-card dd { margin: 0; font-variant-numeric: tabular-nums; }
+.aruco-table-wrap { margin-top: 16px; }
+
+@media (max-width: 720px) {
+  .aruco-shell { width: min(100vw - 16px, 100%); }
+  #aruco-viewer { height: 280px; min-height: 280px; }
+  .compact-actions button { flex: 1; }
+}

@@ -1,1 +1,10 @@
 .dev_lan_config.json
+# Ignore the entire node_modules package folder (Recommended)
+node_modules/
+
+# Ignore custom or local JSON configuration files (Optional)
+config.json
+secret-settings.json
+
+# Ignore all JSON files in a specific 'packages' folder (Optional)
+packages/**/*.json

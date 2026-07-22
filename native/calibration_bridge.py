@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import copy
 import json
 import math
 import os
@@ -16,8 +15,11 @@ from urllib.parse import urlparse
 import serial
 
 
-DEFAULT_JOINT_BY_CAMERA = {
-    0: "base",
+DEFAULT_JOINT_BY_PORT = {
+    "usb-0:1.2.1": "shoulder",
+    "usb-0:1.2.2": "elbow",
+    "usb-0:1.2.3": "wrist",
+    "usb-0:1.2.4": "base",
 }
 CALIBRATION_TARGETS_DEG = {
     "base": 0,
@@ -32,15 +34,6 @@ DEFAULT_NANO_JOINTS = {
     ("dual", "0x69"): "elbow",
     ("single", "0x68"): "wrist",
 }
-MAX_NANO_STATUS_LINE_CHARS = 512
-FEED_TIMING_WINDOW_SIZE = 10
-FEED_ANGLE_WINDOW_SIZES = {
-    "camera": (10,),
-    "accelerometer": (10, 100),
-}
-DEFAULT_ACCEL_POLYNOMIAL_WINDOW = 10
-DEFAULT_ACCEL_POLYNOMIAL_DEGREE = 1
-MIN_ACCEL_POLYNOMIAL_SAMPLES = 5
 
 
 def normalize_angle_180(value):
@@ -48,13 +41,6 @@ def normalize_angle_180(value):
     if result > 180.0:
         result -= 360.0
     if result <= -180.0:
-        result += 360.0
-    return result
-
-
-def normalize_angle_360(value):
-    result = math.fmod(value, 360.0)
-    if result < 0.0:
         result += 360.0
     return result
 
@@ -101,127 +87,6 @@ def fuse_angles_deg(samples):
     if weight_sum <= 0:
         return None
     return normalize_angle_180(math.degrees(math.atan2(y, x)))
-
-
-def average_angles_deg(angles):
-    return fuse_angles_deg([
-        {"angle": angle, "weight": 1.0}
-        for angle in angles
-    ])
-
-
-def arithmetic_average(values):
-    parsed = []
-    for value in values:
-        try:
-            value = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(value):
-            parsed.append(value)
-    return sum(parsed) / len(parsed) if parsed else None
-
-
-def weighted_arithmetic_average(samples):
-    weighted_sum = 0.0
-    weight_sum = 0.0
-    for sample in samples:
-        try:
-            angle = float(sample["angle"])
-            weight = max(0.0, float(sample.get("weight", 1.0)))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(angle) and math.isfinite(weight) and weight > 0.0:
-            weighted_sum += angle * weight
-            weight_sum += weight
-    return weighted_sum / weight_sum if weight_sum > 0.0 else None
-
-
-def solve_linear_system(matrix, values):
-    size = len(values)
-    augmented = [
-        [float(item) for item in matrix[row]] + [float(values[row])]
-        for row in range(size)
-    ]
-    for column in range(size):
-        pivot = max(range(column, size), key=lambda row: abs(augmented[row][column]))
-        if abs(augmented[pivot][column]) < 1e-12:
-            return None
-        augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
-        divisor = augmented[column][column]
-        augmented[column] = [item / divisor for item in augmented[column]]
-        for row in range(size):
-            if row == column:
-                continue
-            factor = augmented[row][column]
-            if abs(factor) < 1e-15:
-                continue
-            augmented[row] = [
-                augmented[row][index] - factor * augmented[column][index]
-                for index in range(size + 1)
-            ]
-    return [augmented[row][-1] for row in range(size)]
-
-
-def least_squares_angle_estimate_deg(samples, degree=1, evaluate_time_ms=None):
-    parsed = []
-    for sample in samples:
-        try:
-            if isinstance(sample, dict):
-                sample_time_ms = float(sample["time_ms"])
-                angle = float(sample["angle"])
-            else:
-                sample_time_ms = float(sample[0])
-                angle = float(sample[1])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(sample_time_ms) and math.isfinite(angle):
-            parsed.append((sample_time_ms, normalize_angle_180(angle)))
-    parsed.sort(key=lambda item: item[0])
-    degree = max(0, int(degree))
-    if len(parsed) < degree + 1:
-        return None
-
-    unwrapped = []
-    previous_raw = parsed[0][1]
-    unwrapped_angle = previous_raw
-    for index, (sample_time_ms, raw_angle) in enumerate(parsed):
-        if index:
-            unwrapped_angle += normalize_angle_180(raw_angle - previous_raw)
-            previous_raw = raw_angle
-        unwrapped.append((sample_time_ms, unwrapped_angle))
-
-    newest_time_ms = unwrapped[-1][0]
-    oldest_time_ms = unwrapped[0][0]
-    time_span_ms = newest_time_ms - oldest_time_ms
-    if time_span_ms <= 1e-9:
-        return average_angles_deg(item[1] for item in parsed)
-    scaled = [
-        ((sample_time_ms - newest_time_ms) / time_span_ms, angle)
-        for sample_time_ms, angle in unwrapped
-    ]
-    coefficient_count = degree + 1
-    normal_matrix = [[0.0] * coefficient_count for _ in range(coefficient_count)]
-    normal_values = [0.0] * coefficient_count
-    for x_value, angle in scaled:
-        powers = [1.0]
-        for _ in range(degree * 2):
-            powers.append(powers[-1] * x_value)
-        for row in range(coefficient_count):
-            normal_values[row] += angle * powers[row]
-            for column in range(coefficient_count):
-                normal_matrix[row][column] += powers[row + column]
-    coefficients = solve_linear_system(normal_matrix, normal_values)
-    if coefficients is None:
-        return average_angles_deg(item[1] for item in parsed)
-
-    evaluation_time_ms = newest_time_ms if evaluate_time_ms is None else float(evaluate_time_ms)
-    evaluation_x = (evaluation_time_ms - newest_time_ms) / time_span_ms
-    estimate = sum(
-        coefficient * (evaluation_x ** power)
-        for power, coefficient in enumerate(coefficients)
-    )
-    return normalize_angle_180(estimate)
 
 
 def parse_dual_sensor_line(line):
@@ -347,54 +212,26 @@ def normalized_targets(targets):
 class CalibrationState:
     def __init__(
         self,
-        joint_by_camera=None,
-        window_size=5,
+        joint_by_port=None,
+        window_size=10,
         wrist_accel_weight=0.3,
         wrist_camera_weight=0.7,
         fusion_fresh_ms=500,
         filter_tau_ms=180,
-        accel_polynomial_window=DEFAULT_ACCEL_POLYNOMIAL_WINDOW,
-        accel_polynomial_degree=DEFAULT_ACCEL_POLYNOMIAL_DEGREE,
     ):
-        self.joint_by_camera = {
-            int(camera): joint
-            for camera, joint in (joint_by_camera or DEFAULT_JOINT_BY_CAMERA).items()
-        }
-        self.window_size = max(1, int(window_size))
+        self.joint_by_port = dict(joint_by_port or DEFAULT_JOINT_BY_PORT)
+        self.window_size = window_size
         self.wrist_accel_weight = wrist_accel_weight
         self.wrist_camera_weight = wrist_camera_weight
         self.fusion_fresh_ms = fusion_fresh_ms
         self.filter_tau_ms = max(1.0, float(filter_tau_ms))
-        self.accel_polynomial_window = max(
-            MIN_ACCEL_POLYNOMIAL_SAMPLES,
-            int(accel_polynomial_window),
-        )
-        self.accel_polynomial_degree = min(
-            max(0, int(accel_polynomial_degree)),
-            self.accel_polynomial_window - 1,
-        )
         self.filter_state = {}
         self.accel_angle_history = {}
-        self.readings_by_joint = {
-            joint: deque(maxlen=self.window_size * 4)
-            for joint in CALIBRATION_JOINTS
-        }
-        self.readings_by_sensor = {joint: {} for joint in CALIBRATION_JOINTS}
+        self.readings_by_joint = {joint: deque(maxlen=window_size) for joint in CALIBRATION_JOINTS}
         self.extra_readings = {key: None for key in EXTRA_SENSOR_KEYS}
         self.nanos = {}
         self.camera_feeds = {}
         self.accelerometer_feeds = {}
-        self.aruco_samples = deque(maxlen=4000)
-        self.aruco_latest = None
-        self.aruco_calibration_result = None
-        self.feed_timing_history = {
-            "camera": {},
-            "accelerometer": {},
-        }
-        self.feed_angle_history = {
-            "camera": {},
-            "accelerometer": {},
-        }
         self.rows = []
         self.calibration_reference = None
         self.last_packet = None
@@ -405,120 +242,21 @@ class CalibrationState:
         self.update_condition = threading.Condition(self.lock)
         self.update_version = 0
 
-    def record_feed_timing(self, feed_type, feed_key, sample_time_ms=None):
-        sample_time_ms = (
-            time.monotonic_ns() / 1_000_000
-            if sample_time_ms is None
-            else float(sample_time_ms)
-        )
-        histories = self.feed_timing_history[feed_type]
-        history = histories.setdefault(
-            str(feed_key),
-            deque(maxlen=FEED_TIMING_WINDOW_SIZE),
-        )
-        history.append(sample_time_ms)
-        average_interval_ms = None
-        if len(history) > 1:
-            average_interval_ms = (history[-1] - history[0]) / (len(history) - 1)
-        return {
-            "average_interval_ms": average_interval_ms,
-            "timing_sample_count": len(history),
-        }
-
-    def record_feed_angle(self, feed_type, feed_key, angle, sample_time_ms=None):
-        histories = self.feed_angle_history[feed_type]
-        window_sizes = FEED_ANGLE_WINDOW_SIZES[feed_type]
-        history_size = max(window_sizes)
-        if feed_type == "accelerometer":
-            history_size = max(history_size, self.accel_polynomial_window)
-        history = histories.setdefault(
-            str(feed_key),
-            deque(maxlen=history_size),
-        )
-        sample_time_ms = (
-            time.monotonic_ns() / 1_000_000
-            if sample_time_ms is None
-            else float(sample_time_ms)
-        )
-        try:
-            angle = float(angle)
-        except (TypeError, ValueError):
-            angle = None
-        standard_base_average = feed_type == "camera" and str(feed_key) == "0"
-        if angle is not None and math.isfinite(angle):
-            if standard_base_average:
-                angle = normalize_angle_360(angle)
-            if history and sample_time_ms < history[-1]["time_ms"]:
-                history.clear()
-            history.append({
-                "time_ms": sample_time_ms,
-                "angle": angle if standard_base_average else normalize_angle_180(angle),
-            })
-
-        stats = {}
-        samples = list(history)
-        for window_size in window_sizes:
-            window = samples[-window_size:]
-            stats[f"average_angle_{window_size}_deg"] = (
-                arithmetic_average(item["angle"] for item in window)
-                if standard_base_average and window
-                else average_angles_deg(item["angle"] for item in window) if window
-                else None
-            )
-            stats[f"angle_sample_count_{window_size}"] = len(window)
-
-        if feed_type == "accelerometer":
-            polynomial_samples = samples[-self.accel_polynomial_window:]
-            polynomial_angle = None
-            if len(polynomial_samples) >= MIN_ACCEL_POLYNOMIAL_SAMPLES:
-                polynomial_angle = least_squares_angle_estimate_deg(
-                    polynomial_samples,
-                    degree=self.accel_polynomial_degree,
-                )
-            stats.update({
-                "polynomial_angle_deg": polynomial_angle,
-                "polynomial_sample_count": len(polynomial_samples),
-                "polynomial_window_size": self.accel_polynomial_window,
-                "polynomial_degree": self.accel_polynomial_degree,
-            })
-
-        # Preserve the original last-10 field names for API clients that have
-        # not switched to the explicit window-size names yet.
-        stats["average_angle_deg"] = stats["average_angle_10_deg"]
-        stats["angle_sample_count"] = stats["angle_sample_count_10"]
-        stats["average_method"] = "arithmetic" if standard_base_average else "circular"
-        return stats
-
     def append_joint_reading(self, joint, reading):
         reading = dict(reading)
         source = reading.get("source", "unknown")
-        standard_base_average = joint == "base" and source == "camera"
-        sensor_id = reading.get("port_label")
-        if not sensor_id and reading.get("camera") is not None:
-            sensor_id = f"camera:{reading['camera']}"
-        key = (joint, source, str(sensor_id or source))
+        key = (joint, source)
         now_ms = float(reading.get("filter_time_ms", reading.get("received_at_ms", time.time() * 1000)))
-        measurement_angle = float(reading["angle"])
-        raw_angle = float(reading.get("raw_sensor_angle", measurement_angle))
-        if standard_base_average:
-            measurement_angle = normalize_angle_360(measurement_angle)
-            raw_angle = normalize_angle_360(raw_angle)
-        else:
-            measurement_angle = normalize_angle_180(measurement_angle)
-            raw_angle = normalize_angle_180(raw_angle)
+        raw_angle = normalize_angle_180(float(reading["angle"]))
         previous = self.filter_state.get(key)
-        if previous is not None and now_ms < previous["received_at_ms"]:
-            self.filter_state.pop(key, None)
-            self.accel_angle_history.pop(key, None)
-            previous = None
 
-        measurement = measurement_angle
+        measurement = raw_angle
         if source == "accel":
             history = self.accel_angle_history.setdefault(key, deque(maxlen=3))
             if previous:
-                unwrapped = previous["angle"] + normalize_angle_180(measurement_angle - previous["angle"])
+                unwrapped = previous["angle"] + normalize_angle_180(raw_angle - previous["angle"])
             else:
-                unwrapped = measurement_angle
+                unwrapped = raw_angle
             history.append(unwrapped)
             measurement = normalize_angle_180(sorted(history)[len(history) // 2])
 
@@ -529,35 +267,23 @@ class CalibrationState:
             dt_ms = max(0.1, now_ms - previous["received_at_ms"])
             dt_seconds = dt_ms / 1000.0
             gyro_rate = float(reading.get("gyro_rate", 0.0) or 0.0)
-            predicted = previous["angle"] + gyro_rate * dt_seconds
+            predicted = normalize_angle_180(previous["angle"] + gyro_rate * dt_seconds)
             correction = 1.0 - math.exp(-dt_ms / self.filter_tau_ms)
-            if standard_base_average:
-                filtered_angle = predicted + correction * (measurement - predicted)
-            else:
-                predicted = normalize_angle_180(predicted)
-                error = normalize_angle_180(measurement - predicted)
-                filtered_angle = normalize_angle_180(predicted + correction * error)
+            error = normalize_angle_180(measurement - predicted)
+            filtered_angle = normalize_angle_180(predicted + correction * error)
             instantaneous_hz = 1000.0 / dt_ms
             old_hz = previous.get("sample_hz")
             sample_hz = instantaneous_hz if old_hz is None else old_hz * 0.9 + instantaneous_hz * 0.1
 
         reading["raw_angle"] = raw_angle
-        if source == "accel":
-            reading["polynomial_angle"] = measurement_angle
         reading["angle"] = filtered_angle
         reading["sample_hz"] = sample_hz
-        reading["average_method"] = "arithmetic" if standard_base_average else "circular"
         self.filter_state[key] = {
             "angle": filtered_angle,
             "received_at_ms": now_ms,
             "sample_hz": sample_hz,
         }
         self.readings_by_joint[joint].append(reading)
-        sensor_history = self.readings_by_sensor[joint].setdefault(
-            key,
-            deque(maxlen=self.window_size),
-        )
-        sensor_history.append(reading)
         self.update_version += 1
         self.update_condition.notify_all()
         return reading
@@ -576,58 +302,33 @@ class CalibrationState:
             "ok": True,
             "source_mode": source_mode,
             "filter_tau_ms": self.filter_tau_ms,
-            "estimate_window_size": self.window_size,
-            "fusion_weighting": "sample_rate",
-            "accel_polynomial_window": self.accel_polynomial_window,
-            "accel_polynomial_degree": self.accel_polynomial_degree,
             "sent_at_ms": int(time.time() * 1000),
             "latest": status["latest"],
             "averages": status["averages"],
+            "camera_feeds": status["camera_feeds"],
+            "accelerometer_feeds": status["accelerometer_feeds"],
             "accelerometers": {
-                "nanos": status["nanos"],
                 "feeds": status["accelerometer_feeds"],
+                "nanos": status["nanos"],
                 "last_packet": status["nano"]["last_packet"],
                 "errors": status["nano"]["errors"],
             },
-            "camera_feeds": status["camera_feeds"],
-            "aruco": status["aruco"],
             "calibration_reference": status["calibration_reference"],
         }
 
     def push_packet(self, payload):
-        if isinstance(payload.get("aruco_markers"), list):
-            self.push_aruco_packet(payload)
-            return
-        camera = payload.get("camera")
-        try:
-            camera_index = int(camera)
-        except (TypeError, ValueError):
-            camera_index = None
-        joint = self.joint_by_camera.get(camera_index)
+        port_label = str(payload.get("port_label") or "")
+        joint = self.joint_by_port.get(port_label)
         now_ms = int(time.time() * 1000)
         with self.lock:
-            camera_key = str(camera) if camera is not None else "unknown"
-            timing = self.record_feed_timing("camera", camera_key)
-            angle_average = self.record_feed_angle("camera", camera_key, payload.get("angle"))
-            self.camera_feeds[camera_key] = {
-                "camera": camera,
-                "angle": payload.get("angle"),
-                "pairs": payload.get("pairs"),
-                "expected_pairs": payload.get("expected_pairs"),
-                "codes": payload.get("codes", payload.get("pairs")),
-                "ring_positions": payload.get("ring_positions", payload.get("expected_pairs")),
-                "markers": payload.get("markers"),
-                "elapsed_ms": payload.get("elapsed_ms"),
-                "frame": payload.get("frame"),
-                "received_at_ms": now_ms,
-                **timing,
-                **angle_average,
-            }
             self.last_packet = {
                 **payload,
                 "joint": joint,
                 "received_at_ms": now_ms,
             }
+            camera = payload.get("camera")
+            if camera is not None:
+                self.camera_feeds[str(camera)] = dict(self.last_packet)
             if not joint:
                 return
             angle = payload.get("angle")
@@ -639,7 +340,7 @@ class CalibrationState:
                 "angle": angle,
                 "source": "camera",
                 "camera": payload.get("camera"),
-                "port_label": f"camera:{camera_key}",
+                "port_label": port_label,
                 "ts_ms": payload.get("ts_ms", now_ms),
                 "filter_time_ms": payload.get("ts_ms", now_ms),
                 "received_at_ms": now_ms,
@@ -648,82 +349,13 @@ class CalibrationState:
                 self.extra_readings["wrist_camera"] = {
                     "angle": angle,
                     "camera": payload.get("camera"),
-                    "port_label": f"camera:{camera_key}",
+                    "port_label": port_label,
                     "ts_ms": payload.get("ts_ms", now_ms),
                     "received_at_ms": now_ms,
                 }
 
-    def push_aruco_packet(self, payload):
-        now_ms = int(time.time() * 1000)
-        try:
-            camera_ts_ms = int(payload.get("ts_ms", now_ms))
-        except (TypeError, ValueError):
-            camera_ts_ms = now_ms
-        markers = []
-        for marker in payload.get("aruco_markers", []):
-            try:
-                marker_id = int(marker.get("id"))
-            except (AttributeError, TypeError, ValueError):
-                continue
-            if marker_id not in {0, 1, 2, 3}:
-                continue
-            markers.append(copy.deepcopy(marker))
-
-        with self.lock:
-            accelerometers = copy.deepcopy(self.accelerometer_feeds)
-            for reading in accelerometers.values():
-                reading["camera_delta_ms"] = (
-                    int(reading.get("received_at_ms", now_ms)) - camera_ts_ms
-                )
-            sample = {
-                "camera": payload.get("camera", 0),
-                "frame": payload.get("frame"),
-                "camera_ts_ms": camera_ts_ms,
-                "received_at_ms": now_ms,
-                "marker_length_m": payload.get("marker_length_m"),
-                "intrinsics_approximate": bool(payload.get("intrinsics_approximate", False)),
-                "markers": markers,
-                "accelerometers": accelerometers,
-            }
-            self.aruco_samples.append(sample)
-            self.aruco_latest = sample
-            self.update_version += 1
-            self.update_condition.notify_all()
-
-    def aruco_status(self, include_samples=False):
-        with self.lock:
-            result = {
-                "ok": True,
-                "latest": copy.deepcopy(self.aruco_latest),
-                "sample_count": len(self.aruco_samples),
-                "calibration_result": copy.deepcopy(self.aruco_calibration_result),
-            }
-            if include_samples:
-                result["samples"] = copy.deepcopy(list(self.aruco_samples))
-            return result
-
-    def reset_aruco_session(self):
-        with self.lock:
-            self.aruco_samples.clear()
-            self.aruco_latest = None
-            self.aruco_calibration_result = None
-            self.update_version += 1
-            self.update_condition.notify_all()
-        return self.aruco_status()
-
-    def save_aruco_calibration_result(self, result):
-        with self.lock:
-            self.aruco_calibration_result = {
-                **(copy.deepcopy(result) if isinstance(result, dict) else {}),
-                "saved_at": datetime.now(timezone.utc).isoformat(),
-            }
-        return self.aruco_status()
-
     def push_nano_line(self, name, port, line):
         now_ms = int(time.time() * 1000)
-        status_line = line
-        if len(status_line) > MAX_NANO_STATUS_LINE_CHARS:
-            status_line = f"{status_line[:MAX_NANO_STATUS_LINE_CHARS]}… [truncated]"
         parsed = (
             parse_dual_sensor_line(line)
             or parse_compact_mpu_line(line)
@@ -732,59 +364,29 @@ class CalibrationState:
         )
         with self.lock:
             nano = self.nanos.setdefault(name, {"name": name, "port": port})
-            recent_lines = nano.setdefault("recent_lines", [])
-            recent_lines.append({"line": status_line, "received_at_ms": now_ms})
-            del recent_lines[:-20]
             nano.update({
                 "name": name,
                 "port": port,
-                "last_line": status_line,
+                "last_line": line,
                 "received_at_ms": now_ms,
             })
             if parsed:
                 nano["parsed"] = parsed
-                address = parsed.get("address")
-                feed_key = f"{name}:{address}" if address else name
-                wrist_accel = parsed.get("wrist_accel") or {}
-                feed_raw_angle = parsed.get("angle")
-                if feed_raw_angle is None and parsed.get("mpu_ok"):
-                    feed_raw_angle = wrist_accel.get("angle")
-                timing = self.record_feed_timing("accelerometer", feed_key)
-                angle_average = self.record_feed_angle(
-                    "accelerometer",
-                    feed_key,
-                    feed_raw_angle,
-                    parsed.get("device_ms"),
-                )
-                polynomial_angle = angle_average.get("polynomial_angle_deg")
-                estimated_feed_angle = (
-                    polynomial_angle
-                    if feed_raw_angle is not None and polynomial_angle is not None
-                    else feed_raw_angle
-                )
-                self.accelerometer_feeds[feed_key] = {
-                    "name": name,
-                    "port": port,
-                    "address": address,
-                    "type": parsed.get("type"),
-                    "angle": estimated_feed_angle,
-                    "raw_angle": feed_raw_angle,
-                    "accel": parsed.get("accel"),
-                    "gyro": parsed.get("gyro"),
-                    "temp_c": parsed.get("temp_c"),
-                    "mpu_ok": parsed.get("mpu_ok"),
-                    "received_at_ms": now_ms,
-                    **timing,
-                    **angle_average,
-                }
                 if parsed["type"] in {"compact_mpu", "addressed_mpu", "single_mpu"}:
                     joint = DEFAULT_NANO_JOINTS.get((name, parsed["address"]))
+                    feed_key = f"{name}:{parsed['address']}"
+                    sensor_reading = {
+                        "angle": float(parsed["angle"]),
+                        "accel": parsed.get("accel"),
+                        "gyro": parsed.get("gyro"),
+                        "temp_c": parsed.get("temp_c"),
+                        "nano": name,
+                        "port": port,
+                        "received_at_ms": now_ms,
+                    }
                     if joint:
-                        self.append_joint_reading(joint, {
-                            "angle": float(estimated_feed_angle),
-                            "raw_sensor_angle": float(parsed["angle"]),
-                            "polynomial_sample_count": angle_average.get("polynomial_sample_count"),
-                            "polynomial_degree": angle_average.get("polynomial_degree"),
+                        filtered = self.append_joint_reading(joint, {
+                            "angle": float(parsed["angle"]),
                             "gyro_rate": float((parsed.get("gyro") or {}).get("y", 0.0)),
                             "source": "accel",
                             "camera": None,
@@ -793,10 +395,14 @@ class CalibrationState:
                             "filter_time_ms": parsed.get("device_ms", now_ms),
                             "received_at_ms": now_ms,
                         })
+                        sensor_reading["raw_angle"] = filtered["raw_angle"]
+                        sensor_reading["angle"] = filtered["angle"]
+                        sensor_reading["sample_hz"] = filtered["sample_hz"]
+                    self.accelerometer_feeds[feed_key] = sensor_reading
+                wrist_accel = parsed.get("wrist_accel") or {}
                 if parsed.get("mpu_ok") and wrist_accel.get("angle") is not None:
                     wrist_reading = {
-                        "angle": float(estimated_feed_angle),
-                        "raw_sensor_angle": float(wrist_accel["angle"]),
+                        "angle": float(wrist_accel["angle"]),
                         "accel": wrist_accel.get("accel"),
                         "gyro": wrist_accel.get("gyro"),
                         "temp_c": wrist_accel.get("temp_c"),
@@ -807,9 +413,6 @@ class CalibrationState:
                     }
                     filtered_wrist = self.append_joint_reading("wrist", {
                         "angle": wrist_reading["angle"],
-                        "raw_sensor_angle": wrist_reading["raw_sensor_angle"],
-                        "polynomial_sample_count": angle_average.get("polynomial_sample_count"),
-                        "polynomial_degree": angle_average.get("polynomial_degree"),
                         "gyro_rate": float((wrist_accel.get("gyro") or {}).get("y", 0.0)),
                         "source": "accel",
                         "camera": None,
@@ -844,121 +447,49 @@ class CalibrationState:
         with self.lock:
             self.nano_errors[name] = error
 
-    def set_nano_connected(self, name, port, baud):
-        now_ms = int(time.time() * 1000)
-        with self.lock:
-            nano = self.nanos.setdefault(name, {"name": name, "port": port})
-            nano.update({
-                "name": name,
-                "port": port,
-                "baud": baud,
-                "connected_at_ms": now_ms,
-            })
-
-    def _joint_estimate_locked(self, joint, source_mode, now_ms):
-        standard_base_average = joint == "base"
-        sensor_estimates = []
-        for sensor_key, history in self.readings_by_sensor[joint].items():
-            source = sensor_key[1]
-            if source_mode != "both" and source != source_mode:
-                continue
-            readings = list(history)[-self.window_size:]
-            if not readings:
-                continue
-            latest = readings[-1]
-            age_ms = now_ms - int(latest.get("received_at_ms", now_ms))
-            if age_ms > self.fusion_fresh_ms:
-                continue
-            angle = (
-                arithmetic_average(item["angle"] for item in readings)
-                if standard_base_average
-                else average_angles_deg(item["angle"] for item in readings)
-            )
-            if angle is None:
-                continue
-            if source == "camera":
-                base_weight = self.wrist_camera_weight
-            elif source == "accel":
-                base_weight = self.wrist_accel_weight
-            else:
-                base_weight = 1.0
-            first_received_ms = int(readings[0].get("received_at_ms", now_ms))
-            last_received_ms = int(readings[-1].get("received_at_ms", now_ms))
-            window_duration_ms = last_received_ms - first_received_ms
-            if len(readings) > 1 and window_duration_ms > 0:
-                data_rate_hz = (len(readings) - 1) * 1000.0 / window_duration_ms
-            else:
-                data_rate_hz = float(latest.get("sample_hz") or 1.0)
-            weight = base_weight * max(0.1, data_rate_hz)
-            sensor_estimates.append({
-                "sensor": sensor_key[2],
-                "source": source,
-                "angle": angle,
-                "weight": weight,
-                "base_weight": base_weight,
-                "data_rate_hz": data_rate_hz,
-                "count": len(readings),
-                "age_ms": age_ms,
-                "raw_angle": latest.get("raw_angle", latest["angle"]),
-                "sample_hz": latest.get("sample_hz"),
-                "camera": latest.get("camera"),
-                "port_label": latest.get("port_label", ""),
-            })
-
-        fused_angle = (
-            weighted_arithmetic_average(sensor_estimates)
-            if standard_base_average
-            else fuse_angles_deg(sensor_estimates)
-        )
-        if fused_angle is None:
-            return None
-
-        newest = min(sensor_estimates, key=lambda item: item["age_ms"])
-        sources = []
-        for item in sensor_estimates:
-            if item["source"] not in sources:
-                sources.append(item["source"])
-        estimate = {
-            "angle": fused_angle,
-            "raw_angle": newest["raw_angle"],
-            "sample_hz": newest["sample_hz"],
-            "source": "+".join(sources),
-            "camera": newest["camera"],
-            "port_label": newest["port_label"],
-            "age_ms": newest["age_ms"],
-            "count": sum(item["count"] for item in sensor_estimates),
-            "sensor_count": len(sensor_estimates),
-            "window_size": self.window_size,
-            "sensor_estimates": sensor_estimates,
-            "average_method": "arithmetic" if standard_base_average else "circular",
-        }
-        for source in ("camera", "accel"):
-            matching = [item for item in sensor_estimates if item["source"] == source]
-            estimate[f"{source}_angle"] = (
-                weighted_arithmetic_average(matching)
-                if standard_base_average
-                else fuse_angles_deg(matching)
-            )
-        return estimate
-
-    def joint_estimates(self, source_mode="both"):
-        now_ms = int(time.time() * 1000)
-        with self.lock:
-            return {
-                joint: self._joint_estimate_locked(joint, source_mode, now_ms)
-                for joint in CALIBRATION_JOINTS
-            }
-
     def averages(self, source_mode="both"):
-        return self.joint_estimates(source_mode)
+        now_ms = int(time.time() * 1000)
+        result = {}
+        with self.lock:
+            for joint in CALIBRATION_JOINTS:
+                readings = [
+                    item for item in self.readings_by_joint[joint]
+                    if source_mode == "both" or item.get("source") == source_mode
+                ]
+                if not readings:
+                    result[joint] = None
+                    continue
+                latest = readings[-1]
+                result[joint] = {
+                    "angle": sum(item["angle"] for item in readings) / len(readings),
+                    "count": len(readings),
+                    "camera": latest.get("camera"),
+                    "port_label": latest.get("port_label", ""),
+                    "age_ms": now_ms - int(latest.get("received_at_ms", now_ms)),
+                }
+        return result
 
     def latest_readings(self, source_mode="both"):
         now_ms = int(time.time() * 1000)
+        result = {}
         with self.lock:
-            result = {
-                joint: self._joint_estimate_locked(joint, source_mode, now_ms)
-                for joint in CALIBRATION_JOINTS
-            }
+            for joint in CALIBRATION_JOINTS:
+                readings = [
+                    item for item in self.readings_by_joint[joint]
+                    if source_mode == "both" or item.get("source") == source_mode
+                ]
+                if not readings:
+                    result[joint] = None
+                    continue
+                latest = readings[-1]
+                result[joint] = {
+                    "angle": latest["angle"],
+                    "raw_angle": latest.get("raw_angle", latest["angle"]),
+                    "sample_hz": latest.get("sample_hz"),
+                    "camera": latest.get("camera"),
+                    "port_label": latest.get("port_label", ""),
+                    "age_ms": now_ms - int(latest.get("received_at_ms", now_ms)),
+                }
             extras = {
                 key: dict(value) if value else None
                 for key, value in self.extra_readings.items()
@@ -971,6 +502,40 @@ class CalibrationState:
             value["age_ms"] = now_ms - int(value.get("received_at_ms", now_ms))
             result[key] = value
 
+        camera = result.get("wrist_camera") if source_mode in {"camera", "both"} else None
+        accel = result.get("wrist_accel") if source_mode in {"accel", "both"} else None
+        fresh_ms = self.fusion_fresh_ms
+        fused_angle = fuse_angles_deg([
+            {
+                "angle": camera["angle"],
+                "weight": self.wrist_camera_weight,
+            }
+            if camera and camera.get("age_ms", fresh_ms + 1) <= fresh_ms
+            else None,
+            {
+                "angle": accel["angle"],
+                "weight": self.wrist_accel_weight,
+            }
+            if accel and accel.get("age_ms", fresh_ms + 1) <= fresh_ms
+            else None,
+        ])
+        if fused_angle is not None:
+            result["wrist"] = {
+                "angle": fused_angle,
+                "source": "camera+mpu6050",
+                "camera_angle": camera.get("angle") if camera else None,
+                "accel_angle": accel.get("angle") if accel else None,
+                "raw_angle": accel.get("raw_angle") if accel else (camera.get("angle") if camera else None),
+                "sample_hz": accel.get("sample_hz") if accel else None,
+                "age_ms": min(
+                    [
+                        item.get("age_ms", fresh_ms)
+                        for item in (camera, accel)
+                        if item is not None
+                    ]
+                    or [0]
+                ),
+            }
         return result
 
     def status(self, udp_host, udp_port, source_mode="both"):
@@ -983,20 +548,15 @@ class CalibrationState:
             last_nano_packet = dict(self.last_nano_packet) if self.last_nano_packet else None
             udp_error = self.udp_error
             nanos = {name: dict(value) for name, value in self.nanos.items()}
-            camera_feeds = {key: dict(value) for key, value in self.camera_feeds.items()}
-            accelerometer_feeds = {key: dict(value) for key, value in self.accelerometer_feeds.items()}
-            aruco_latest = copy.deepcopy(self.aruco_latest)
-            aruco_sample_count = len(self.aruco_samples)
-            aruco_calibration_result = copy.deepcopy(self.aruco_calibration_result)
+            camera_feeds = {name: dict(value) for name, value in self.camera_feeds.items()}
+            accelerometer_feeds = {
+                name: dict(value) for name, value in self.accelerometer_feeds.items()
+            }
             nano_errors = dict(self.nano_errors)
         return {
             "ok": True,
             "source_mode": source_mode,
             "filter_tau_ms": self.filter_tau_ms,
-            "estimate_window_size": self.window_size,
-            "fusion_weighting": "sample_rate",
-            "accel_polynomial_window": self.accel_polynomial_window,
-            "accel_polynomial_degree": self.accel_polynomial_degree,
             "udp": {
                 "host": udp_host,
                 "port": udp_port,
@@ -1009,12 +569,7 @@ class CalibrationState:
             "nanos": nanos,
             "camera_feeds": camera_feeds,
             "accelerometer_feeds": accelerometer_feeds,
-            "aruco": {
-                "latest": aruco_latest,
-                "sample_count": aruco_sample_count,
-                "calibration_result": aruco_calibration_result,
-            },
-            "joint_by_camera": self.joint_by_camera,
+            "joint_by_port": self.joint_by_port,
             "targets_deg": CALIBRATION_TARGETS_DEG,
             "averages": self.averages(source_mode),
             "latest": self.latest_readings(source_mode),
@@ -1148,7 +703,6 @@ def run_nano_reader(state, name, port, baud):
         device = None
         try:
             device = serial.Serial(port, baud, timeout=0.1)
-            state.set_nano_connected(name, port, baud)
             state.set_nano_error(name, None)
             buffer = b""
             last_data_at = time.monotonic()
@@ -1197,16 +751,6 @@ def make_handler(state, udp_host, udp_port):
                     source_mode = "both"
                 self._send_json(200, state.status(udp_host, udp_port, source_mode))
                 return
-            if path == "/api/calibration/aruco/status":
-                query = dict(
-                    part.split("=", 1) if "=" in part else (part, "")
-                    for part in parsed_url.query.split("&") if part
-                )
-                self._send_json(
-                    200,
-                    state.aruco_status(query.get("samples") in {"1", "true", "yes"}),
-                )
-                return
             if path == "/api/calibration/stream":
                 query = dict(
                     part.split("=", 1) if "=" in part else (part, "")
@@ -1246,8 +790,6 @@ def make_handler(state, udp_host, udp_port):
                 "/api/calibration/capture",
                 "/api/calibration/uncalibrate",
                 "/api/calibration/clear",
-                "/api/calibration/aruco/reset",
-                "/api/calibration/aruco/complete",
             }:
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 body = self.rfile.read(length).decode("utf-8", "replace") if length else "{}"
@@ -1258,15 +800,6 @@ def make_handler(state, udp_host, udp_port):
                 source_mode = str(payload.get("source_mode") or "both")
                 if source_mode not in {"accel", "camera", "both"}:
                     source_mode = "both"
-                if path == "/api/calibration/aruco/reset":
-                    self._send_json(200, state.reset_aruco_session())
-                    return
-                if path == "/api/calibration/aruco/complete":
-                    self._send_json(
-                        200,
-                        state.save_aruco_calibration_result(payload.get("result")),
-                    )
-                    return
                 if path == "/api/calibration/uncalibrate":
                     self._send_json(
                         200,
@@ -1325,18 +858,6 @@ def main():
     parser.add_argument("--wrist-camera-weight", type=float, default=0.7)
     parser.add_argument("--fusion-fresh-ms", type=int, default=500)
     parser.add_argument("--filter-ms", type=float, default=180)
-    parser.add_argument(
-        "--accel-polynomial-window",
-        type=int,
-        default=DEFAULT_ACCEL_POLYNOMIAL_WINDOW,
-        help="Number of recent accelerometer angles in the least-squares fit (minimum 5).",
-    )
-    parser.add_argument(
-        "--accel-polynomial-degree",
-        type=int,
-        default=DEFAULT_ACCEL_POLYNOMIAL_DEGREE,
-        help="Least-squares polynomial degree (1 is recommended for short windows).",
-    )
     args = parser.parse_args()
 
     state = CalibrationState(
@@ -1344,8 +865,6 @@ def main():
         wrist_camera_weight=args.wrist_camera_weight,
         fusion_fresh_ms=args.fusion_fresh_ms,
         filter_tau_ms=args.filter_ms,
-        accel_polynomial_window=args.accel_polynomial_window,
-        accel_polynomial_degree=args.accel_polynomial_degree,
     )
     udp_thread = threading.Thread(
         target=run_udp_listener,
